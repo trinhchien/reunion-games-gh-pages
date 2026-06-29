@@ -28,6 +28,8 @@
             </div>
           </div>
           <div class="top-actions">
+            <!-- Player join button — shows phone/name after join -->
+            <button class="button button-ghost" id="playerJoinBtn" type="button">Tham gia</button>
             <a class="button button-ghost" href="./admin.html">Trang admin</a>
           </div>
         </nav>
@@ -58,8 +60,41 @@
     </div>
 
     <footer class="footer">
-      <p>Built for GitHub Pages • Các phần quản trị tổng quan chỉ xuất hiện trong trang admin có mật khẩu.</p>
+      <p>Dữ liệu đồng bộ realtime • Các phần quản trị tổng quan chỉ xuất hiện trong trang admin có mật khẩu.</p>
     </footer>
+
+    <!-- Player Join Modal -->
+    <div class="player-modal" id="playerModal" role="dialog" aria-modal="true" aria-labelledby="playerModalTitle">
+      <div class="player-modal-card">
+        <button class="modal-close" id="playerModalClose" type="button" aria-label="Đóng">&times;</button>
+        <p class="eyebrow">Người tham dự</p>
+        <h2 id="playerModalTitle">Nhập thông tin của bạn</h2>
+        <p>Không cần xác thực — chỉ để nhận dạng và lưu kỷ niệm trong buổi họp lớp.</p>
+        <form class="stack-form" id="playerJoinForm">
+          <label class="field">
+            <span>Số điện thoại</span>
+            <input
+              id="playerPhoneInput"
+              type="tel"
+              placeholder="Ví dụ: 0912345678"
+              autocomplete="tel"
+              required
+            />
+          </label>
+          <label class="field">
+            <span>Tên của bạn (tuỳ chọn)</span>
+            <input
+              id="playerNameInput"
+              type="text"
+              placeholder="Nguyễn Văn A"
+              autocomplete="name"
+            />
+          </label>
+          <button class="button" type="submit" id="playerJoinBtn2">Tham gia ngay</button>
+        </form>
+        <p class="auth-message" id="playerJoinStatus"></p>
+      </div>
+    </div>
 
     <script src="./script.js"></script>
   </body>

@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Admin | 10 Năm Ngày Trở Về</title>
-    <meta name="description" content="Trang quản trị riêng cho buổi họp lớp, có bảo vệ bằng mật khẩu băm SHA-256." />
+    <meta name="description" content="Trang quản trị riêng cho buổi họp lớp, có bảo vệ bằng mật khẩu." />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -30,32 +30,20 @@
           </div>
         </nav>
 
+        <!-- Auth Shell — hidden when logged in -->
         <section class="auth-shell" id="authShell">
-          <div class="auth-card" id="setupCard">
-            <p class="eyebrow">Thiết lập lần đầu</p>
-            <h2>Tạo mật khẩu admin</h2>
-            <p>Mật khẩu không được lưu plain text. Trình duyệt chỉ giữ giá trị băm SHA-256 để kiểm tra đăng nhập.</p>
-            <form class="stack-form" id="setupForm">
-              <label class="field">
-                <span>Mật khẩu mới</span>
-                <input id="setupPasswordInput" type="password" placeholder="Nhập mật khẩu admin" />
-              </label>
-              <label class="field">
-                <span>Nhập lại mật khẩu</span>
-                <input id="setupPasswordConfirmInput" type="password" placeholder="Nhập lại để xác nhận" />
-              </label>
-              <button class="button" type="submit">Khởi tạo bảo vệ</button>
-            </form>
-          </div>
-
-          <div class="auth-card hidden" id="loginCard">
+          <div class="auth-card" id="loginCard">
             <p class="eyebrow">Đăng nhập</p>
             <h2>Truy cập trang admin</h2>
-            <p>Nhập mật khẩu để mở khu tổng quan, cấu hình game, quản lý danh sách tham dự và vòng quay.</p>
+            <p>Nhập tên đăng nhập và mật khẩu để mở khu tổng quan, cấu hình game, quản lý danh sách tham dự và vòng quay.</p>
             <form class="stack-form" id="loginForm">
               <label class="field">
+                <span>Tên đăng nhập</span>
+                <input id="loginUsernameInput" type="text" placeholder="Nhập tên đăng nhập" autocomplete="username" />
+              </label>
+              <label class="field">
                 <span>Mật khẩu</span>
-                <input id="loginPasswordInput" type="password" placeholder="Nhập mật khẩu admin" />
+                <input id="loginPasswordInput" type="password" placeholder="Nhập mật khẩu admin" autocomplete="current-password" />
               </label>
               <button class="button" type="submit">Mở trang admin</button>
             </form>
@@ -223,7 +211,7 @@
     </div>
 
     <footer class="footer">
-      <p>Trang admin được bảo vệ bằng băm SHA-256 trong trình duyệt. Không lưu plain text password trong mã nguồn.</p>
+      <p>Trang admin được bảo vệ bằng JWT. Dữ liệu lưu trong PostgreSQL và đồng bộ realtime qua WebSocket.</p>
     </footer>
 
     <script src="./admin.js"></script>

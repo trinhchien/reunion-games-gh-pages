@@ -1,123 +1,18 @@
-const STORAGE_KEY = "reunion-games-admin-state-v1";
-
-const defaultState = {
-  attendees: [],
-  games: [
-    {
-      id: "bingo",
-      title: "Bingo Ký Ức Lớp Mình",
-      duration: 12,
-      enabled: true,
-      objective: "Phá băng và kéo mọi người bắt chuyện ngay từ đầu buổi.",
-      supplies: "Phiếu bingo, bút, sticker check-in.",
-      notes: "Nên đặt 12-16 ô có nội dung liên quan kỷ niệm của lớp.",
-      bingoItems: [
-        "Từng ngồi bàn cuối",
-        "Hay ngủ gật trong giờ",
-        "Từng bị ghi sổ đầu bài",
-        "Lần đầu đi họp lớp sau 10 năm",
-        "Từng làm lớp phó",
-        "Hay đi học muộn",
-        "Có ảnh kỷ yếu siêu hài",
-        "Từng trốn tiết thành công",
-        "Hay bị gọi lên bảng",
-        "Từng tham gia văn nghệ",
-        "Từng trực nhật cùng bạn",
-        "Từng mượn bài chép gấp",
-      ],
-    },
-    {
-      id: "image",
-      title: "Đuổi Hình Bắt Kỷ Niệm",
-      duration: 15,
-      enabled: true,
-      objective: "Gợi lại chuyện cũ thông qua ảnh lớp, sự kiện và nhân vật quen thuộc.",
-      supplies: "Slide ảnh, màn chiếu, chuông hoặc bảng đáp án.",
-      notes: "Có thể dùng ảnh crop một phần để tăng độ khó.",
-    },
-    {
-      id: "memory",
-      title: "Ai Là Chủ Nhân Kỷ Niệm Này",
-      duration: 20,
-      enabled: true,
-      objective: "Làm nổi bật từng thành viên bằng các mẩu chuyện ẩn danh vui.",
-      supplies: "Form thu kỷ niệm, micro, màn chiếu.",
-      notes: "Thu kỷ niệm trước ngày tổ chức 3-5 ngày.",
-    },
-    {
-      id: "relay",
-      title: "Truyền Tin Phiên Bản 10 Năm Sau",
-      duration: 15,
-      enabled: true,
-      objective: "Tạo tiếng cười qua việc truyền sai thông điệp giữa các thành viên.",
-      supplies: "Giấy, bút, bộ câu nói ngắn.",
-      notes: "Nhớ chọn nội dung vui, gọn, dễ nghe nhầm.",
-    },
-    {
-      id: "tower",
-      title: "Xây Tháp Cam Kết",
-      duration: 18,
-      enabled: true,
-      objective: "Kết thúc vui cho chương trình và khuyến khích mọi người gửi lời chúc.",
-      supplies: "Ly giấy, dây, bảng điểm.",
-      notes: "Mỗi lượt đặt ly cần nói một điều tốt đẹp cho lần gặp sau.",
-    },
-  ],
-};
-
-const palette = ["#c76431", "#dd8b52", "#efb168", "#ad4e2d", "#e48d78", "#f2c38b", "#9d6b4a", "#7f4732"];
-
-let state = loadState();
+// ─── State ───────────────────────────────────────────────────────────────────
+let state = { games: [], attendees: [] };
 let currentRotation = 0;
 let wheelSpinning = false;
-let wheelPoolSnapshot = [];
 let activePublicTab = "wheel";
+let playerSession = null; // { phone, name, id }
+let ws = null;
+
+const palette = ["#c76431", "#dd8b52", "#efb168", "#ad4e2d", "#e48d78", "#f2c38b", "#9d6b4a", "#7f4732"];
 
 const heroGameActions = document.getElementById("heroGameActions");
 const publicTabStrip = document.getElementById("publicTabStrip");
 const publicPanels = document.getElementById("publicPanels");
 
-function loadState() {
-  const saved = window.localStorage.getItem(STORAGE_KEY);
-  const defaultsById = Object.fromEntries(defaultState.games.map((game) => [game.id, game]));
-
-  if (!saved) {
-    return structuredClone(defaultState);
-  }
-
-  try {
-    const parsed = JSON.parse(saved);
-    const parsedGames = Array.isArray(parsed.games) && parsed.games.length ? parsed.games : defaultState.games;
-    const games = parsedGames.map((game) => {
-      const defaults = defaultsById[game.id] ?? {};
-      return {
-        ...structuredClone(defaults),
-        ...game,
-        bingoItems: Array.isArray(game.bingoItems)
-          ? game.bingoItems.filter(Boolean)
-          : Array.isArray(defaults.bingoItems)
-            ? structuredClone(defaults.bingoItems)
-            : undefined,
-      };
-    });
-
-    return {
-      games,
-      attendees: Array.isArray(parsed.attendees) ? parsed.attendees : [],
-    };
-  } catch (error) {
-    return structuredClone(defaultState);
-  }
-}
-
-function saveState() {
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-}
-
-function getEnabledGames() {
-  return state.games.filter((game) => game.enabled);
-}
-
+// ─── Utilities ────────────────────────────────────────────────────────────────
 function escapeHtml(value) {
   return String(value)
     .replaceAll("&", "&amp;")
@@ -126,11 +21,78 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
+// ─── API Helpers ──────────────────────────────────────────────────────────────
+async function apiFetch(path, options = {}) {
+  const res = await fetch(path, {
+    headers: { "Content-Type": "application/json" },
+    ...options,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Network error" }));
+    throw new Error(err.error ?? `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+async function fetchState() {
+  try {
+    const [games, attendees] = await Promise.all([
+      apiFetch("/api/games"),
+      apiFetch("/api/attendees"),
+    ]);
+    state = { games, attendees };
+  } catch (err) {
+    console.error("Không thể tải dữ liệu:", err);
+  }
+}
+
+// ─── WebSocket ────────────────────────────────────────────────────────────────
+function connectWebSocket() {
+  const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+  ws = new WebSocket(`${protocol}//${location.host}/ws`);
+
+  ws.addEventListener("message", (event) => {
+    try {
+      const { event: evtName, data } = JSON.parse(event.data);
+      if (evtName === "state_update") {
+        if (Array.isArray(data.games)) state.games = data.games;
+        if (Array.isArray(data.attendees)) state.attendees = data.attendees;
+        renderAll();
+      } else if (evtName === "wheel_result" && !wheelSpinning) {
+        // Another device triggered spin — show result on this screen
+        const winnerBox = document.getElementById("winnerBox");
+        if (winnerBox && data.winner) {
+          winnerBox.innerHTML = `<strong>${escapeHtml(data.winner.name)}</strong>Người may mắn vừa được chọn từ vòng quay.`;
+        }
+      }
+    } catch {
+      // Ignore malformed messages
+    }
+  });
+
+  ws.addEventListener("close", () => {
+    ws = null;
+    setTimeout(connectWebSocket, 3000);
+  });
+
+  ws.addEventListener("error", () => {
+    ws?.close();
+  });
+}
+
+// ─── Rendering ────────────────────────────────────────────────────────────────
+function getEnabledGames() {
+  return state.games.filter((g) => g.enabled);
+}
+
+function getEligibleAttendees() {
+  return state.attendees.filter((a) => !a.excluded);
+}
+
 function renderBingoPreview(items) {
   if (!items?.length) {
     return `<div class="empty-state">Chưa có ô bingo nào. Ban tổ chức cần cập nhật từ trang admin.</div>`;
   }
-
   return `
     <div class="bingo-preview">
       ${items.map((item) => `<div class="bingo-cell">${escapeHtml(item)}</div>`).join("")}
@@ -163,7 +125,7 @@ function renderGamePanel(game) {
             <ul class="checklist">
               <li>Mỗi người nhận 1 phiếu bingo với các ô ký ức khác nhau.</li>
               <li>Người chơi đi tìm bạn phù hợp với từng ô và xin xác nhận.</li>
-              <li>Ai hoàn thành một hàng ngang, dọc hoặc chéo trước sẽ hô “Bingo”.</li>
+              <li>Ai hoàn thành một hàng ngang, dọc hoặc chéo trước sẽ hô "Bingo".</li>
               <li>Nội dung ô bingo được ban tổ chức cập nhật từ trang admin riêng.</li>
               <li>Nên chọn ô đủ vui nhưng không quá riêng tư để ai cũng dễ tham gia.</li>
             </ul>
@@ -209,7 +171,7 @@ function renderGamePanel(game) {
 }
 
 function renderWheelPanel() {
-  const eligibleCount = state.attendees.filter((attendee) => !attendee.excluded).length;
+  const eligibleCount = getEligibleAttendees().length;
 
   return `
     <section class="tab-panel ${activePublicTab === "wheel" ? "is-active" : ""}" data-tab-panel="wheel">
@@ -254,7 +216,7 @@ function renderWheelPanel() {
 function renderPublicTabs() {
   const enabledGames = getEnabledGames();
 
-  if (!enabledGames.some((game) => game.id === activePublicTab) && activePublicTab !== "wheel") {
+  if (!enabledGames.some((g) => g.id === activePublicTab) && activePublicTab !== "wheel") {
     activePublicTab = enabledGames[0]?.id ?? "wheel";
   }
 
@@ -295,19 +257,17 @@ function renderPublicTabs() {
 function renderEligibleList() {
   const eligibleList = document.getElementById("eligibleList");
   const eligibleCountLabel = document.getElementById("eligibleCountLabel");
-  if (!eligibleList || !eligibleCountLabel) {
-    return;
-  }
+  if (!eligibleList || !eligibleCountLabel) return;
 
-  const eligible = state.attendees.filter((attendee) => !attendee.excluded);
+  const eligible = getEligibleAttendees();
   eligibleCountLabel.textContent = `${eligible.length} người sẵn sàng`;
   eligibleList.innerHTML = eligible.length
     ? eligible
         .map(
-          (attendee) => `
+          (a) => `
             <div class="attendee-item">
               <div>
-                <div class="attendee-name">${escapeHtml(attendee.name)}</div>
+                <div class="attendee-name">${escapeHtml(a.name)}</div>
                 <div class="attendee-status">Sẵn sàng tham gia vòng quay</div>
               </div>
             </div>
@@ -317,15 +277,10 @@ function renderEligibleList() {
     : `<div class="empty-state">Không còn ai trong pool quay. Vào trang admin để mở lại danh sách.</div>`;
 }
 
-function getEligibleAttendees() {
-  return state.attendees.filter((attendee) => !attendee.excluded);
-}
-
+// ─── Wheel Drawing ────────────────────────────────────────────────────────────
 function drawWheel(rotation = currentRotation, pool = getEligibleAttendees()) {
   const wheelCanvas = document.getElementById("wheelCanvas");
-  if (!wheelCanvas) {
-    return;
-  }
+  if (!wheelCanvas) return;
 
   const wheelCtx = wheelCanvas.getContext("2d");
   const size = wheelCanvas.width;
@@ -384,17 +339,9 @@ function drawWheel(rotation = currentRotation, pool = getEligibleAttendees()) {
   wheelCtx.restore();
 }
 
-function getWinnerFromRotation(rotation, pool) {
-  const sliceAngle = (Math.PI * 2) / pool.length;
-  const normalized = ((Math.PI * 1.5 - rotation) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
-  const index = Math.floor(normalized / sliceAngle) % pool.length;
-  return pool[index];
-}
-
-function spinWheel() {
-  if (wheelSpinning) {
-    return;
-  }
+// ─── Wheel Spin ───────────────────────────────────────────────────────────────
+async function spinWheel() {
+  if (wheelSpinning) return;
 
   const eligible = getEligibleAttendees();
   const winnerBox = document.getElementById("winnerBox");
@@ -407,68 +354,145 @@ function spinWheel() {
   }
 
   wheelSpinning = true;
-  wheelPoolSnapshot = eligible;
   spinWheelBtn.disabled = true;
 
-  const extraTurns = 5 + Math.random() * 3;
-  const randomOffset = Math.random() * Math.PI * 2;
-  const startRotation = currentRotation;
-  const endRotation = currentRotation + extraTurns * Math.PI * 2 + randomOffset;
-  const duration = 4200;
-  const startTime = performance.now();
+  try {
+    const result = await apiFetch("/api/turns/spin", {
+      method: "POST",
+      body: JSON.stringify({ autoExclude: removeWinnerToggle.checked }),
+    });
 
-  function animate(now) {
-    const elapsed = now - startTime;
-    const progress = Math.min(elapsed / duration, 1);
-    const eased = 1 - (1 - progress) ** 4;
-    currentRotation = startRotation + (endRotation - startRotation) * eased;
-    drawWheel(currentRotation, wheelPoolSnapshot);
+    const { winner, winnerIndex, eligible: serverPool } = result;
+    const pool = serverPool;
+    const n = pool.length;
 
-    if (progress < 1) {
-      requestAnimationFrame(animate);
-      return;
-    }
+    // Calculate the exact animation endpoint so the winner lands at the top pointer
+    const sliceAngle = (Math.PI * 2) / n;
+    const targetNormalized = winnerIndex * sliceAngle + sliceAngle / 2;
+    const targetRotationBase = Math.PI * 1.5 - targetNormalized;
+    const extraTurns = 5 + Math.random() * 3;
+    // Compute delta to reach targetRotationBase from currentRotation after extra full turns
+    const currentMod = ((currentRotation % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+    const baseMod = ((targetRotationBase % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+    const angleDiff = ((baseMod - currentMod) + Math.PI * 2) % (Math.PI * 2);
+    const endRotation = currentRotation + extraTurns * Math.PI * 2 + angleDiff;
 
-    const winner = getWinnerFromRotation(currentRotation, wheelPoolSnapshot);
-    if (winner) {
-      winnerBox.innerHTML = `<strong>${escapeHtml(winner.name)}</strong>Người may mắn vừa được chọn từ vòng quay.`;
+    const startRotation = currentRotation;
+    const duration = 4200;
+    const startTime = performance.now();
 
-      if (removeWinnerToggle.checked) {
-        const attendee = state.attendees.find((item) => item.id === winner.id);
-        if (attendee) {
-          attendee.excluded = true;
-          saveState();
-        }
+    function animate(now) {
+      const elapsed = now - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      const eased = 1 - (1 - progress) ** 4;
+      currentRotation = startRotation + (endRotation - startRotation) * eased;
+      drawWheel(currentRotation, pool);
+
+      if (progress < 1) {
+        requestAnimationFrame(animate);
+        return;
       }
+
+      // Animation finished
+      winnerBox.innerHTML = `<strong>${escapeHtml(winner.name)}</strong>Người may mắn vừa được chọn từ vòng quay.`;
+      wheelSpinning = false;
+      spinWheelBtn.disabled = false;
+      // State update (excluded flag) arrives via WebSocket broadcast
     }
 
+    requestAnimationFrame(animate);
+  } catch (err) {
+    console.error("Spin thất bại:", err);
+    winnerBox.textContent = `Lỗi: ${err.message}`;
     wheelSpinning = false;
     spinWheelBtn.disabled = false;
-    renderAll();
   }
-
-  requestAnimationFrame(animate);
 }
 
-function resetExcluded() {
-  state.attendees = state.attendees.map((attendee) => ({ ...attendee, excluded: false }));
-  saveState();
-  const winnerBox = document.getElementById("winnerBox");
-  if (winnerBox) {
-    winnerBox.textContent = "Tất cả người tham dự đã được mở lại vào pool quay.";
+async function resetExcluded() {
+  try {
+    await apiFetch("/api/attendees/reset-excluded", { method: "POST" });
+    const winnerBox = document.getElementById("winnerBox");
+    if (winnerBox) winnerBox.textContent = "Tất cả người tham dự đã được mở lại vào pool quay.";
+    // State will arrive via WebSocket broadcast
+  } catch (err) {
+    console.error("Reset thất bại:", err);
   }
-  renderAll();
 }
 
+// ─── Player Join Modal ────────────────────────────────────────────────────────
+function setupPlayerModal() {
+  const joinBtn = document.getElementById("playerJoinBtn");
+  const modal = document.getElementById("playerModal");
+  const closeBtn = document.getElementById("playerModalClose");
+  const form = document.getElementById("playerJoinForm");
+  const phoneInput = document.getElementById("playerPhoneInput");
+  const nameInput = document.getElementById("playerNameInput");
+  const statusEl = document.getElementById("playerJoinStatus");
+
+  if (!joinBtn || !modal) return;
+
+  // Restore session
+  const saved = sessionStorage.getItem("reunion-player-session");
+  if (saved) {
+    try {
+      playerSession = JSON.parse(saved);
+      updateJoinButton();
+    } catch {
+      sessionStorage.removeItem("reunion-player-session");
+    }
+  }
+
+  joinBtn.addEventListener("click", () => {
+    modal.classList.add("is-open");
+    phoneInput?.focus();
+  });
+
+  closeBtn?.addEventListener("click", () => modal.classList.remove("is-open"));
+
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) modal.classList.remove("is-open");
+  });
+
+  form?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const phone = phoneInput.value.trim();
+    const name = nameInput.value.trim();
+    if (!phone) return;
+
+    joinBtn.disabled = true;
+    statusEl.textContent = "Đang lưu...";
+
+    try {
+      const player = await apiFetch("/api/players/join", {
+        method: "POST",
+        body: JSON.stringify({ phone, name }),
+      });
+      playerSession = player;
+      sessionStorage.setItem("reunion-player-session", JSON.stringify(player));
+      statusEl.textContent = `✅ Chào ${player.name || player.phone}!`;
+      updateJoinButton();
+      setTimeout(() => modal.classList.remove("is-open"), 1500);
+    } catch (err) {
+      statusEl.textContent = `Lỗi: ${err.message}`;
+    } finally {
+      joinBtn.disabled = false;
+    }
+  });
+}
+
+function updateJoinButton() {
+  const joinBtn = document.getElementById("playerJoinBtn");
+  if (!joinBtn || !playerSession) return;
+  joinBtn.textContent = playerSession.name || playerSession.phone;
+}
+
+// ─── Event Wiring ─────────────────────────────────────────────────────────────
 function wireDynamicEvents() {
   const spinWheelBtn = document.getElementById("spinWheelBtn");
   const resetWinnersBtn = document.getElementById("resetWinnersBtn");
-  if (spinWheelBtn) {
-    spinWheelBtn.addEventListener("click", spinWheel);
-  }
-  if (resetWinnersBtn) {
-    resetWinnersBtn.addEventListener("click", resetExcluded);
-  }
+  if (spinWheelBtn) spinWheelBtn.addEventListener("click", spinWheel);
+  if (resetWinnersBtn) resetWinnersBtn.addEventListener("click", resetExcluded);
 }
 
 function renderAll() {
@@ -480,12 +504,15 @@ function renderAll() {
 
 document.addEventListener("click", (event) => {
   const tabTarget = event.target.closest("[data-tab-target]");
-  if (!tabTarget) {
-    return;
-  }
-
+  if (!tabTarget) return;
   activePublicTab = tabTarget.dataset.tabTarget;
   renderAll();
 });
 
-renderAll();
+// ─── Init ─────────────────────────────────────────────────────────────────────
+(async () => {
+  await fetchState();
+  renderAll();
+  connectWebSocket();
+  setupPlayerModal();
+})();

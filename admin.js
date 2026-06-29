@@ -81,6 +81,10 @@ const setupPasswordConfirmInput = document.getElementById("setupPasswordConfirmI
 const loginPasswordInput = document.getElementById("loginPasswordInput");
 const adminApp = document.getElementById("adminApp");
 const logoutBtn = document.getElementById("logoutBtn");
+const summaryGames = document.getElementById("summaryGames");
+const summaryAttendees = document.getElementById("summaryAttendees");
+const summaryDuration = document.getElementById("summaryDuration");
+const adminOverviewGames = document.getElementById("adminOverviewGames");
 const adminGameTabs = document.getElementById("adminGameTabs");
 const adminGamesList = document.getElementById("adminGamesList");
 const attendeeList = document.getElementById("attendeeList");
@@ -178,6 +182,39 @@ function renderBingoPreview(items) {
       ${items.map((item) => `<div class="bingo-cell">${escapeHtml(item)}</div>`).join("")}
     </div>
   `;
+}
+
+function renderSummaries() {
+  const activeGames = state.games.filter((game) => game.enabled);
+  const totalDuration = activeGames.reduce((sum, game) => sum + Number(game.duration || 0), 0);
+  summaryGames.textContent = String(activeGames.length);
+  summaryAttendees.textContent = String(state.attendees.length);
+  summaryDuration.textContent = `${totalDuration} phút`;
+}
+
+function renderOverviewGames() {
+  const activeGames = state.games.filter((game) => game.enabled);
+  if (!activeGames.length) {
+    adminOverviewGames.innerHTML = `<div class="empty-state">Chưa có game nào đang bật.</div>`;
+    return;
+  }
+
+  adminOverviewGames.innerHTML = activeGames
+    .map(
+      (game, index) => `
+        <article class="game-card ${index === 0 ? "featured" : ""}">
+          <span class="tag">${game.duration} phút</span>
+          <h3>${game.title}</h3>
+          <p>${game.objective}</p>
+          <ul>
+            <li>Đạo cụ: ${game.supplies}</li>
+            <li>Ghi chú: ${game.notes}</li>
+          </ul>
+          ${game.id === "bingo" ? renderBingoPreview(game.bingoItems) : ""}
+        </article>
+      `
+    )
+    .join("");
 }
 
 function renderBingoAdmin(game) {
@@ -290,6 +327,8 @@ function renderAttendees() {
 }
 
 function renderAdminApp() {
+  renderSummaries();
+  renderOverviewGames();
   renderAdminGames();
   renderAttendees();
 }

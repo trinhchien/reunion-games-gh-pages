@@ -1,0 +1,7 @@
+tunnel: REPLACE_WITH_YOUR_TUNNEL_ID
+credentials-file: /home/REPLACE_WITH_YOUR_USERNAME/.cloudflared/REPLACE_WITH_YOUR_TUNNEL_ID.json
+
+ingress:
+  - hostname: harness.io.vn
+    service: http://localhost:3000
+  - service: http_status:404
