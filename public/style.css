@@ -59,7 +59,6 @@ textarea {
 .hero-grid,
 .split-section,
 .games-grid,
-.timeline,
 .team-grid,
 .admin-list,
 .attendee-list {
@@ -107,8 +106,7 @@ textarea {
 .eyebrow,
 .kicker,
 .card-label,
-.tag,
-.time {
+.tag {
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
@@ -156,7 +154,6 @@ textarea {
 
 .intro,
 .panel p,
-.timeline-item p,
 .game-card p,
 .team-card p,
 .winner-box,
@@ -229,7 +226,6 @@ textarea {
 .hero-card,
 .panel,
 .game-card,
-.timeline-item,
 .team-card,
 .admin-card,
 .attendee-item {
@@ -248,19 +244,10 @@ textarea {
 .hero-card,
 .panel,
 .game-card,
-.admin-card,
-.timeline-item {
+.admin-card {
   padding: 22px;
 }
 
-.scoreboard {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 14px;
-  margin: 18px 0 22px;
-}
-
-.scoreboard div,
 .team-card,
 .winner-box,
 .field textarea,
@@ -270,33 +257,6 @@ textarea {
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.74);
   border: 1px solid var(--line);
-}
-
-.scoreboard div {
-  padding: 14px;
-}
-
-.scoreboard span {
-  display: block;
-  font-size: 0.8rem;
-  color: var(--muted);
-  margin-bottom: 6px;
-}
-
-.scoreboard strong {
-  font-family: "Space Grotesk", sans-serif;
-  font-size: 1.2rem;
-}
-
-.highlight-note {
-  padding: 18px;
-  border-radius: 22px;
-  background: linear-gradient(180deg, rgba(244, 202, 170, 0.8), rgba(255, 250, 243, 0.9));
-}
-
-.note-title {
-  margin: 0 0 8px;
-  font-weight: 700;
 }
 
 .section {
@@ -324,25 +284,12 @@ textarea {
   display: block;
 }
 
-.timeline {
-  gap: 14px;
-}
-
-.timeline-item {
-  display: grid;
-  grid-template-columns: 96px 1fr;
-  gap: 18px;
-  align-items: start;
-}
-
-.timeline-item h3,
 .game-card h3,
 .team-card h3,
 .admin-card h3 {
   margin: 0 0 8px;
 }
 
-.time,
 .tag {
   display: inline-flex;
   align-items: center;
@@ -370,24 +317,130 @@ textarea {
   color: var(--muted);
 }
 
+.bingo-board,
 .bingo-preview {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(var(--bingo-cols, 4), 1fr);
+  grid-template-rows: repeat(var(--bingo-rows, 4), auto);
+  gap: 8px;
   margin-top: 14px;
 }
 
 .bingo-cell {
-  min-height: 84px;
-  padding: 12px;
-  border-radius: 18px;
+  min-height: 76px;
+  padding: 10px;
+  border-radius: 14px;
   background: rgba(255, 255, 255, 0.74);
   border: 1px solid var(--line);
   color: var(--text);
-  font-size: 0.95rem;
-  line-height: 1.45;
+  font-size: 0.88rem;
+  line-height: 1.4;
   display: flex;
   align-items: center;
+  justify-content: center;
+  text-align: center;
+  word-break: break-word;
+  transition: background 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+}
+
+.bingo-cell:hover {
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 4px 12px rgba(150, 69, 34, 0.1);
+  transform: translateY(-1px);
+}
+
+.bingo-cell-empty {
+  border: 1px dashed rgba(150, 69, 34, 0.22);
+  background: rgba(255, 255, 255, 0.4);
+  color: var(--muted);
+  font-size: 0.78rem;
+  opacity: 0.5;
+}
+
+.bingo-cell-free {
+  background: linear-gradient(135deg, rgba(199, 100, 49, 0.12), rgba(241, 198, 166, 0.28));
+  border: 2px solid var(--accent);
+  color: var(--accent-dark);
+  font-weight: 700;
+  font-size: 0.82rem;
+  letter-spacing: 0.05em;
+}
+
+/* ─── Bingo Admin Section ─────────────────────────────────────────────────── */
+.bingo-admin-section {
+  padding: 18px;
+  border-radius: 20px;
+  background: rgba(255, 249, 241, 0.5);
+  border: 1px solid rgba(241, 198, 166, 0.3);
+}
+
+.bingo-size-selector {
+  margin: 10px 0 16px;
+}
+
+.bingo-size-selector .field-label {
+  display: block;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.bingo-size-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.bingo-size-btn {
+  border: 1px solid rgba(150, 69, 34, 0.18);
+  border-radius: 12px;
+  padding: 10px 18px;
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--accent-dark);
+  font-weight: 600;
+  font-size: 0.88rem;
+  cursor: pointer;
+  transition: transform 160ms ease, background 160ms ease, color 160ms ease, box-shadow 160ms ease;
+  font-family: "Space Grotesk", sans-serif;
+}
+
+.bingo-size-btn:hover {
+  transform: translateY(-1px);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.bingo-size-btn.is-active {
+  color: white;
+  background: linear-gradient(135deg, var(--accent-dark), var(--accent));
+  border-color: transparent;
+  box-shadow: 0 6px 16px rgba(160, 79, 33, 0.18);
+}
+
+.bingo-free-toggle {
+  margin: 12px 0;
+  border-radius: 14px;
+}
+
+.bingo-divider {
+  border: 0;
+  border-top: 1px solid rgba(150, 69, 34, 0.12);
+  margin: 18px 0;
+}
+
+.bingo-status-warn {
+  color: var(--accent) !important;
+  font-weight: 600;
+}
+
+.bingo-status-over {
+  color: var(--danger) !important;
+  font-weight: 600;
+}
+
+.bingo-status-ok {
+  color: var(--success) !important;
+  font-weight: 600;
 }
 
 .team-grid,
@@ -670,10 +723,6 @@ textarea {
   .form-grid {
     grid-template-columns: 1fr;
   }
-
-  .scoreboard {
-    grid-template-columns: 1fr;
-  }
 }
 
 @media (max-width: 720px) {
@@ -686,13 +735,11 @@ textarea {
   .panel,
   .game-card,
   .hero-card,
-  .timeline-item,
   .admin-card {
     border-radius: 22px;
   }
 
-  .topbar,
-  .timeline-item {
+  .topbar {
     grid-template-columns: 1fr;
   }
 
@@ -774,6 +821,14 @@ textarea {
 
 .modal-close:hover {
   background: rgba(0, 0, 0, 0.12);
+}
+
+/* ─── Save Bar ──────────────────────────────────────────────────────────────── */
+.save-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-top: 4px;
 }
 
 /* ─── Save Indicator ────────────────────────────────────────────────────────── */

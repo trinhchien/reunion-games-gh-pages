@@ -26,9 +26,12 @@ games.get("/", async (c) => {
     supplies: row.supplies,
     notes: row.notes,
     bingoItems: (row.extra as Record<string, unknown>)?.bingoItems ?? undefined,
+    bingoSize: (row.extra as Record<string, unknown>)?.bingoSize ?? undefined,
+    bingoFreeSpace: (row.extra as Record<string, unknown>)?.bingoFreeSpace ?? undefined,
     sort_order: row.sort_order,
   }));
 
+  console.log(`  🎮 ${result.length} enabled games returned`);
   return c.json(result);
 });
 

@@ -5,6 +5,8 @@ let wheelSpinning = false;
 let activePublicTab = "wheel";
 let playerSession = null; // { phone, name, id }
 let ws = null;
+let renderQueued = false;
+let lastEnabledGameIds = "";
 
 const palette = ["#c76431", "#dd8b52", "#efb168", "#ad4e2d", "#e48d78", "#f2c38b", "#9d6b4a", "#7f4732"];
 
@@ -21,16 +23,43 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
+// Fisher-Yates shuffle — returns a new array
+function shuffleArray(arr) {
+  const shuffled = [...arr];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled;
+}
+
+// Cache shuffled bingo items so the board doesn't re-shuffle on every re-render
+let bingoShuffleCache = null;
+
+function getShuffledBingoItems(items) {
+  const key = JSON.stringify(items);
+  if (bingoShuffleCache && bingoShuffleCache.key === key) {
+    return bingoShuffleCache.items;
+  }
+  const shuffled = shuffleArray(items || []);
+  bingoShuffleCache = { key, items: shuffled };
+  return shuffled;
+}
+
 // ─── API Helpers ──────────────────────────────────────────────────────────────
 async function apiFetch(path, options = {}) {
+  const method = options.method || "GET";
+  console.log(`🌐 ${method} ${path}`);
   const res = await fetch(path, {
     headers: { "Content-Type": "application/json" },
     ...options,
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: "Network error" }));
+    console.error(`🌐 ${method} ${path} → ${res.status} ${err.error}`);
     throw new Error(err.error ?? `HTTP ${res.status}`);
   }
+  console.log(`🌐 ${method} ${path} → ${res.status}`);
   return res.json();
 }
 
@@ -47,19 +76,34 @@ async function fetchState() {
 }
 
 // ─── WebSocket ────────────────────────────────────────────────────────────────
+function scheduleRender() {
+  if (!renderQueued) {
+    renderQueued = true;
+    requestAnimationFrame(() => {
+      renderQueued = false;
+      renderAll();
+    });
+  }
+}
+
 function connectWebSocket() {
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+  console.log(`🔌 WS connecting to ${protocol}//${location.host}/ws`);
   ws = new WebSocket(`${protocol}//${location.host}/ws`);
+
+  ws.addEventListener("open", () => {
+    console.log("🔌 WS connected");
+  });
 
   ws.addEventListener("message", (event) => {
     try {
       const { event: evtName, data } = JSON.parse(event.data);
+      console.log(`📡 WS received "${evtName}"`);
       if (evtName === "state_update") {
         if (Array.isArray(data.games)) state.games = data.games;
         if (Array.isArray(data.attendees)) state.attendees = data.attendees;
-        renderAll();
+        scheduleRender();
       } else if (evtName === "wheel_result" && !wheelSpinning) {
-        // Another device triggered spin — show result on this screen
         const winnerBox = document.getElementById("winnerBox");
         if (winnerBox && data.winner) {
           winnerBox.innerHTML = `<strong>${escapeHtml(data.winner.name)}</strong>Người may mắn vừa được chọn từ vòng quay.`;
@@ -71,7 +115,9 @@ function connectWebSocket() {
   });
 
   ws.addEventListener("close", () => {
+    console.log("🔌 WS disconnected — reconnecting in 3s");
     ws = null;
+    scheduleRender();
     setTimeout(connectWebSocket, 3000);
   });
 
@@ -89,19 +135,56 @@ function getEligibleAttendees() {
   return state.attendees.filter((a) => !a.excluded);
 }
 
-function renderBingoPreview(items) {
-  if (!items?.length) {
+function getBingoSize(game) {
+  const size = game.bingoSize;
+  if (size && size.rows >= 3 && size.rows <= 5 && size.cols >= 3 && size.cols <= 5) {
+    return size;
+  }
+  return { rows: 4, cols: 4 };
+}
+
+function getBingoGridItems(items, size, hasFreeSpace) {
+  const total = size.rows * size.cols;
+  const filled = Array.isArray(items) ? [...items] : [];
+  while (filled.length < total) filled.push("");
+  const grid = [];
+  for (let r = 0; r < size.rows; r++) {
+    const row = [];
+    for (let c = 0; c < size.cols; c++) {
+      const idx = r * size.cols + c;
+      const isFree = hasFreeSpace && size.rows % 2 === 1 && size.cols % 2 === 1 && r === Math.floor(size.rows / 2) && c === Math.floor(size.cols / 2);
+      row.push({
+        text: isFree ? "★ FREE" : (filled[idx] || ""),
+        isEmpty: !filled[idx] && !isFree,
+        isFree,
+      });
+    }
+    grid.push(row);
+  }
+  return grid;
+}
+
+function renderBingoPreview(items, size, hasFreeSpace) {
+  if (!items?.length && !hasFreeSpace) {
     return `<div class="empty-state">Chưa có ô bingo nào. Ban tổ chức cần cập nhật từ trang admin.</div>`;
   }
+  const gridSize = size || getBingoSize({ bingoSize: null });
+  const grid = getBingoGridItems(items, gridSize, hasFreeSpace);
   return `
-    <div class="bingo-preview">
-      ${items.map((item) => `<div class="bingo-cell">${escapeHtml(item)}</div>`).join("")}
+    <div class="bingo-board" style="--bingo-cols: ${gridSize.cols}; --bingo-rows: ${gridSize.rows};">
+      ${grid.map(row => row.map(cell => `
+        <div class="bingo-cell ${cell.isFree ? "bingo-cell-free" : ""} ${cell.isEmpty ? "bingo-cell-empty" : ""}">
+          ${escapeHtml(cell.text)}
+        </div>
+      `).join("")).join("")}
     </div>
   `;
 }
 
 function renderGamePanel(game) {
   if (game.id === "bingo") {
+    // Shuffle items so each user/view sees a random board
+    const shuffledItems = getShuffledBingoItems(game.bingoItems);
     return `
       <section class="tab-panel ${activePublicTab === game.id ? "is-active" : ""}" data-tab-panel="${game.id}">
         <section class="section split-section">
@@ -114,7 +197,7 @@ function renderGamePanel(game) {
             <div class="inline-actions">
               <span class="tag">${game.duration} phút</span>
             </div>
-            ${renderBingoPreview(game.bingoItems)}
+            ${renderBingoPreview(shuffledItems, getBingoSize(game), Boolean(game.bingoFreeSpace))}
           </div>
 
           <div class="panel">
@@ -170,11 +253,10 @@ function renderGamePanel(game) {
   `;
 }
 
-function renderWheelPanel() {
+function renderWheelPanelContent() {
   const eligibleCount = getEligibleAttendees().length;
-
   return `
-    <section class="tab-panel ${activePublicTab === "wheel" ? "is-active" : ""}" data-tab-panel="wheel">
+    <section class="tab-panel wheel-panel-inner">
       <section class="section split-section wheel-layout">
         <div class="panel wheel-panel">
           <div class="section-heading compact">
@@ -215,43 +297,74 @@ function renderWheelPanel() {
 
 function renderPublicTabs() {
   const enabledGames = getEnabledGames();
+  const newIds = enabledGames.map(g => g.id).sort().join(",");
+  const gamesChanged = newIds !== lastEnabledGameIds;
 
   if (!enabledGames.some((g) => g.id === activePublicTab) && activePublicTab !== "wheel") {
     activePublicTab = enabledGames[0]?.id ?? "wheel";
   }
 
-  heroGameActions.innerHTML = enabledGames
-    .slice(0, 2)
-    .map(
-      (game, index) => `
-        <button
-          class="button ${index === 0 ? "" : "button-secondary"}"
-          type="button"
-          data-tab-target="${game.id}"
-        >
-          ${escapeHtml(game.title)}
-        </button>
-      `
-    )
-    .concat(
-      `<button class="button button-secondary" type="button" data-tab-target="wheel">Vòng quay</button>`
-    )
-    .join("");
+  // Only rebuild tab navigation when enabled games set changes
+  if (gamesChanged) {
+    lastEnabledGameIds = newIds;
 
-  publicTabStrip.innerHTML = enabledGames
-    .map(
-      (game) => `
-        <button class="tab-chip ${activePublicTab === game.id ? "is-active" : ""}" type="button" data-tab-target="${game.id}">
-          ${escapeHtml(game.title)}
-        </button>
-      `
-    )
-    .concat(
-      `<button class="tab-chip ${activePublicTab === "wheel" ? "is-active" : ""}" type="button" data-tab-target="wheel">Vòng quay may mắn</button>`
-    )
-    .join("");
+    heroGameActions.innerHTML = enabledGames
+      .slice(0, 2)
+      .map(
+        (game, index) => `
+          <button
+            class="button ${index === 0 ? "" : "button-secondary"}"
+            type="button"
+            data-tab-target="${game.id}"
+          >
+            ${escapeHtml(game.title)}
+          </button>
+        `
+      )
+      .concat(
+        `<button class="button button-secondary" type="button" data-tab-target="wheel">Vòng quay</button>`
+      )
+      .join("");
 
-  publicPanels.innerHTML = enabledGames.map(renderGamePanel).join("") + renderWheelPanel();
+    publicTabStrip.innerHTML = enabledGames
+      .map(
+        (game) => `
+          <button class="tab-chip ${activePublicTab === game.id ? "is-active" : ""}" type="button" data-tab-target="${game.id}">
+            ${escapeHtml(game.title)}
+          </button>
+        `
+      )
+      .concat(
+        `<button class="tab-chip ${activePublicTab === "wheel" ? "is-active" : ""}" type="button" data-tab-target="wheel">Vòng quay may mắn</button>`
+      )
+      .join("");
+  } else {
+    // Just update active tab chip
+    const chips = publicTabStrip.querySelectorAll(".tab-chip");
+    chips.forEach(chip => {
+      chip.classList.toggle("is-active", chip.dataset.tabTarget === activePublicTab);
+    });
+  }
+
+  // Only rebuild the active panel, not all panels
+  const existingPanel = publicPanels.querySelector(`[data-tab-panel="${activePublicTab}"]`);
+  if (!existingPanel) {
+    publicPanels.innerHTML = enabledGames.map(renderGamePanel).join("") + renderWheelPanelContent();
+  } else {
+    // Update the active panel in-place
+    const game = enabledGames.find(g => g.id === activePublicTab);
+    if (game) {
+      const newHtml = renderGamePanel(game);
+      if (existingPanel.outerHTML !== newHtml) {
+        existingPanel.outerHTML = newHtml;
+      }
+    } else if (activePublicTab === "wheel") {
+      const newHtml = renderWheelPanelContent();
+      if (existingPanel.outerHTML !== newHtml) {
+        existingPanel.outerHTML = newHtml;
+      }
+    }
+  }
 }
 
 function renderEligibleList() {
@@ -484,29 +597,40 @@ function setupPlayerModal() {
 function updateJoinButton() {
   const joinBtn = document.getElementById("playerJoinBtn");
   if (!joinBtn || !playerSession) return;
-  joinBtn.textContent = playerSession.name || playerSession.phone;
+  const label = playerSession.name || playerSession.phone;
+  if (joinBtn.textContent !== label) {
+    joinBtn.textContent = label;
+  }
 }
 
 // ─── Event Wiring ─────────────────────────────────────────────────────────────
-function wireDynamicEvents() {
-  const spinWheelBtn = document.getElementById("spinWheelBtn");
-  const resetWinnersBtn = document.getElementById("resetWinnersBtn");
-  if (spinWheelBtn) spinWheelBtn.addEventListener("click", spinWheel);
-  if (resetWinnersBtn) resetWinnersBtn.addEventListener("click", resetExcluded);
-}
-
 function renderAll() {
   renderPublicTabs();
   renderEligibleList();
-  drawWheel();
-  wireDynamicEvents();
+  if (activePublicTab === "wheel") {
+    drawWheel();
+  }
 }
 
 document.addEventListener("click", (event) => {
   const tabTarget = event.target.closest("[data-tab-target]");
-  if (!tabTarget) return;
-  activePublicTab = tabTarget.dataset.tabTarget;
-  renderAll();
+  if (tabTarget) {
+    activePublicTab = tabTarget.dataset.tabTarget;
+    renderAll();
+    return;
+  }
+
+  const spinBtn = event.target.closest("#spinWheelBtn");
+  if (spinBtn) {
+    spinWheel();
+    return;
+  }
+
+  const resetBtn = event.target.closest("#resetWinnersBtn");
+  if (resetBtn) {
+    resetExcluded();
+    return;
+  }
 });
 
 // ─── Init ─────────────────────────────────────────────────────────────────────

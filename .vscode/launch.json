@@ -1,0 +1,60 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "bun",
+      "request": "launch",
+      "name": "🐰 Bun: Launch (--watch)",
+      "program": "${workspaceFolder}/server/index.ts",
+      "args": [],
+      "runtimeArgs": ["--watch"],
+      "cwd": "${workspaceFolder}",
+      "stopOnEntry": false,
+      "watchMode": true,
+      "noDebug": false,
+      "internalConsoleOptions": "openOnSessionStart",
+      "env": {
+        "PORT": "3000"
+      }
+    },
+    {
+      "type": "bun",
+      "request": "launch",
+      "name": "🐰 Bun: Launch (no watch)",
+      "program": "${workspaceFolder}/server/index.ts",
+      "args": [],
+      "runtimeArgs": [],
+      "cwd": "${workspaceFolder}",
+      "stopOnEntry": false,
+      "watchMode": false,
+      "noDebug": false,
+      "internalConsoleOptions": "openOnSessionStart",
+      "env": {
+        "PORT": "3000"
+      }
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "🔗 Node: Attach to Bun (6499)",
+      "cwd": "${workspaceFolder}",
+      "port": 6499,
+      "attachExistingChildren": true,
+      "sourceMaps": true,
+      "skipFiles": ["<node_internals>/**"],
+      "presentation": {
+        "group": "Bun Debug",
+        "order": 3
+      }
+    }
+  ],
+  "compounds": [
+    {
+      "name": "🐰 Bun: Debug + DB logs",
+      "configurations": ["🐰 Bun: Launch (--watch)"],
+      "presentation": {
+        "order": 1
+      }
+    }
+  ]
+}

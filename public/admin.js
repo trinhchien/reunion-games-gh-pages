@@ -3,8 +3,9 @@ const ADMIN_SESSION_KEY = "reunion-admin-jwt";
 
 let state = { games: [], attendees: [] };
 let activeAdminGameId = null;
-let pendingGameSave = null;
+const dirtyGames = new Set();
 let ws = null;
+let renderQueued = false;
 
 // ─── Token helpers ────────────────────────────────────────────────────────────
 function getToken() {
@@ -26,6 +27,8 @@ function isLoggedIn() {
 // ─── API Helpers ──────────────────────────────────────────────────────────────
 async function adminFetch(path, options = {}) {
   const token = getToken();
+  const method = options.method || "GET";
+  console.log(`🌐 ${method} ${path}`);
   const res = await fetch(path, {
     ...options,
     headers: {
@@ -36,6 +39,7 @@ async function adminFetch(path, options = {}) {
   });
 
   if (res.status === 401) {
+    console.log(`🌐 ${method} ${path} → 401 Unauthorized`);
     clearToken();
     setLoggedIn(false);
     showLoginMode();
@@ -45,9 +49,11 @@ async function adminFetch(path, options = {}) {
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+    console.error(`🌐 ${method} ${path} → ${res.status} ${err.error}`);
     throw new Error(err.error ?? `HTTP ${res.status}`);
   }
 
+  console.log(`🌐 ${method} ${path} → ${res.status}`);
   return res.json();
 }
 
@@ -62,20 +68,39 @@ async function fetchAdminState() {
   }
 }
 
+// ─── Debounced render ────────────────────────────────────────────────────────
+function scheduleAdminRender() {
+  if (!renderQueued) {
+    renderQueued = true;
+    requestAnimationFrame(() => {
+      renderQueued = false;
+      renderAdminApp();
+    });
+  }
+}
+
 // ─── WebSocket ────────────────────────────────────────────────────────────────
 function connectAdminWebSocket() {
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+  console.log(`🔌 WS connecting to ${protocol}//${location.host}/ws`);
   ws = new WebSocket(`${protocol}//${location.host}/ws`);
+
+  ws.addEventListener("open", () => {
+    console.log("🔌 WS connected (admin)");
+  });
 
   ws.addEventListener("message", (event) => {
     try {
       const { event: evtName, data } = JSON.parse(event.data);
+      console.log(`📡 WS received "${evtName}"`);
       if (evtName === "state_update") {
-        // Only refresh if no pending local save (avoid overwriting in-progress edits)
-        if (!pendingGameSave) {
+        // Only refresh if no unsaved changes (avoid overwriting in-progress edits)
+        if (dirtyGames.size === 0) {
           if (Array.isArray(data.games)) state.games = data.games;
           if (Array.isArray(data.attendees)) state.attendees = data.attendees;
-          renderAdminApp();
+          scheduleAdminRender();
+        } else {
+          console.log(`  ⏭️  state_update skipped — ${dirtyGames.size} game(s) dirty`);
         }
       }
     } catch {
@@ -84,8 +109,14 @@ function connectAdminWebSocket() {
   });
 
   ws.addEventListener("close", () => {
+    console.log("🔌 WS disconnected (admin) — reconnecting in 3s");
     ws = null;
     setTimeout(connectAdminWebSocket, 3000);
+  });
+
+  ws.addEventListener("error", () => {
+    console.error("🔌 WS error");
+    ws?.close();
   });
 }
 
@@ -98,9 +129,7 @@ const loginUsernameInput = document.getElementById("loginUsernameInput");
 const loginPasswordInput = document.getElementById("loginPasswordInput");
 const adminApp = document.getElementById("adminApp");
 const logoutBtn = document.getElementById("logoutBtn");
-const summaryGames = document.getElementById("summaryGames");
-const summaryAttendees = document.getElementById("summaryAttendees");
-const summaryDuration = document.getElementById("summaryDuration");
+
 const adminOverviewGames = document.getElementById("adminOverviewGames");
 const adminGameTabs = document.getElementById("adminGameTabs");
 const adminGamesList = document.getElementById("adminGamesList");
@@ -138,23 +167,52 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
-function renderBingoPreview(items) {
-  if (!items?.length) {
-    return `<div class="empty-state">Chưa có ô bingo nào. Hãy nhập nội dung ở vùng phía trên.</div>`;
+function getBingoSize(game) {
+  const size = game.bingoSize;
+  if (size && size.rows >= 3 && size.rows <= 5 && size.cols >= 3 && size.cols <= 5) {
+    return size;
   }
-  return `
-    <div class="bingo-preview">
-      ${items.map((item) => `<div class="bingo-cell">${escapeHtml(item)}</div>`).join("")}
-    </div>
-  `;
+  // Default to 4x4
+  return { rows: 4, cols: 4 };
 }
 
-function renderSummaries() {
-  const activeGames = state.games.filter((g) => g.enabled);
-  const totalDuration = activeGames.reduce((sum, g) => sum + Number(g.duration || 0), 0);
-  summaryGames.textContent = String(activeGames.length);
-  summaryAttendees.textContent = String(state.attendees.length);
-  summaryDuration.textContent = `${totalDuration} phút`;
+function getBingoGridItems(items, size, hasFreeSpace) {
+  const total = size.rows * size.cols;
+  const filled = Array.isArray(items) ? [...items] : [];
+  // Pad with empty strings to fill the grid
+  while (filled.length < total) filled.push("");
+  const grid = [];
+  for (let r = 0; r < size.rows; r++) {
+    const row = [];
+    for (let c = 0; c < size.cols; c++) {
+      const idx = r * size.cols + c;
+      const isFree = hasFreeSpace && size.rows % 2 === 1 && size.cols % 2 === 1 && r === Math.floor(size.rows / 2) && c === Math.floor(size.cols / 2);
+      row.push({
+        text: isFree ? "★ FREE" : (filled[idx] || ""),
+        isEmpty: !filled[idx] && !isFree,
+        isFree,
+      });
+    }
+    grid.push(row);
+  }
+  return grid;
+}
+
+function renderBingoPreview(items, size, hasFreeSpace) {
+  if (!items?.length && !hasFreeSpace) {
+    return `<div class="empty-state">Chưa có ô bingo nào. Hãy nhập nội dung ở vùng phía trên.</div>`;
+  }
+  const gridSize = size || getBingoSize({ bingoSize: null });
+  const grid = getBingoGridItems(items, gridSize, hasFreeSpace);
+  return `
+    <div class="bingo-board" style="--bingo-cols: ${gridSize.cols}; --bingo-rows: ${gridSize.rows};">
+      ${grid.map(row => row.map(cell => `
+        <div class="bingo-cell ${cell.isFree ? "bingo-cell-free" : ""} ${cell.isEmpty ? "bingo-cell-empty" : ""}">
+          ${escapeHtml(cell.text)}
+        </div>
+      `).join("")).join("")}
+    </div>
+  `;
 }
 
 function renderOverviewGames() {
@@ -166,7 +224,14 @@ function renderOverviewGames() {
 
   adminOverviewGames.innerHTML = activeGames
     .map(
-      (game, index) => `
+      (game, index) => {
+        let bingoHtml = "";
+        if (game.id === "bingo") {
+          const size = getBingoSize(game);
+          const hasFree = Boolean(game.bingoFreeSpace);
+          bingoHtml = renderBingoPreview(game.bingoItems, size, hasFree);
+        }
+        return `
         <article class="game-card ${index === 0 ? "featured" : ""}">
           <span class="tag">${game.duration} phút</span>
           <h3>${game.title}</h3>
@@ -175,9 +240,10 @@ function renderOverviewGames() {
             <li>Đạo cụ: ${game.supplies}</li>
             <li>Ghi chú: ${game.notes}</li>
           </ul>
-          ${game.id === "bingo" ? renderBingoPreview(game.bingoItems) : ""}
+          ${bingoHtml}
         </article>
-      `
+      `;
+      }
     )
     .join("");
 }
@@ -185,13 +251,62 @@ function renderOverviewGames() {
 function renderBingoAdmin(game) {
   if (game.id !== "bingo") return "";
   const items = Array.isArray(game.bingoItems) ? game.bingoItems : [];
+  const size = getBingoSize(game);
+  const hasFreeSpace = Boolean(game.bingoFreeSpace);
+  const totalCells = size.rows * size.cols;
+  const neededItems = hasFreeSpace && size.rows % 2 === 1 && size.cols % 2 === 1 ? totalCells - 1 : totalCells;
+  const statusClass = items.length < neededItems ? "bingo-status-warn" : items.length > neededItems ? "bingo-status-over" : "bingo-status-ok";
+  const diff = neededItems - items.length;
+  let statusText = `${items.length} / ${neededItems} ô`;
+  if (diff > 0) {
+    statusText += ` — cần thêm ${diff} ô nữa`;
+  } else if (diff < 0) {
+    statusText += ` — dư ${Math.abs(diff)} ô (sẽ bị ẩn khỏi bảng)`;
+  } else {
+    statusText += ` — vừa đủ ✓`;
+  }
+
+  // Size presets
+  const presets = [
+    { rows: 3, cols: 3, label: "3×3" },
+    { rows: 4, cols: 4, label: "4×4" },
+    { rows: 5, cols: 5, label: "5×5" },
+    { rows: 4, cols: 3, label: "4×3" },
+    { rows: 3, cols: 4, label: "3×4" },
+  ];
+  const allowFreeSpace = size.rows % 2 === 1 && size.cols % 2 === 1;
+
   return `
-    <div class="field field-full">
-      <span>Ô bingo</span>
-      <p class="hint-text">Mỗi dòng là một ô. Bạn có thể nhập từ 9 đến 25 ô tùy kích thước phiếu bingo muốn in.</p>
-      <textarea rows="10" data-field="bingoItems">${escapeHtml(items.join("\n"))}</textarea>
-      <p class="hint-text">Hiện có ${items.length} ô.</p>
-      ${renderBingoPreview(items)}
+    <div class="field field-full bingo-admin-section">
+      <span>Cấu hình bảng Bingo</span>
+
+      <div class="bingo-size-selector">
+        <label class="field-label">Kích thước bảng</label>
+        <div class="bingo-size-options">
+          ${presets.map(p => `
+            <button
+              type="button"
+              class="bingo-size-btn ${size.rows === p.rows && size.cols === p.cols ? "is-active" : ""}"
+              data-bingo-size="${p.rows},${p.cols}"
+            >${p.label}</button>
+          `).join("")}
+        </div>
+      </div>
+
+      ${allowFreeSpace ? `
+        <label class="toggle-row bingo-free-toggle">
+          <span>Ô trung tâm miễn phí (FREE)</span>
+          <input type="checkbox" data-bingo-free="true" ${hasFreeSpace ? "checked" : ""} />
+        </label>
+      ` : `<p class="hint-text">Ô FREE chỉ khả dụng với bảng vuông lẻ (3×3, 5×5).</p>`}
+
+      <hr class="bingo-divider" />
+
+      <span>Nội dung các ô</span>
+      <p class="hint-text">Mỗi dòng là một ô. Số ô cần bằng đúng kích thước bảng (trừ ô FREE).</p>
+      <textarea rows="10" data-field="bingoItems" placeholder="Nhập từng ô bingo, mỗi dòng một ô...">${escapeHtml(items.join("\n"))}</textarea>
+      <p class="hint-text ${statusClass}" id="bingoItemStatus">${statusText}</p>
+      ${renderBingoPreview(items, size, hasFreeSpace)}
     </div>
   `;
 }
@@ -264,7 +379,10 @@ function renderAdminGames() {
         <input type="checkbox" data-field="enabled" ${game.enabled ? "checked" : ""} />
       </label>
 
-      <div class="save-indicator" id="saveIndicator"></div>
+      <div class="save-bar">
+        <button class="button" type="button" data-action="save-game" data-game-id="${game.id}">Lưu thay đổi</button>
+        <span class="save-indicator" id="saveIndicator"></span>
+      </div>
     </article>
   `;
 }
@@ -298,7 +416,6 @@ function renderAttendees() {
 }
 
 function renderAdminApp() {
-  renderSummaries();
   renderOverviewGames();
   renderAdminGames();
   renderAttendees();
@@ -326,9 +443,19 @@ function updateLocalGameField(gameId, field, value) {
       .split(/\r?\n/)
       .map((item) => item.trim())
       .filter(Boolean);
+  } else if (field === "bingoSize") {
+    const [rows, cols] = value.split(",").map(Number);
+    game.bingoSize = { rows, cols };
+  } else if (field === "bingoFreeSpace") {
+    game.bingoFreeSpace = value;
   } else {
     game[field] = value.trim?.() ?? value;
   }
+}
+
+function markDirty(gameId) {
+  dirtyGames.add(gameId);
+  setSaveStatus("⚠ Chưa lưu");
 }
 
 async function saveGameToApi(gameId) {
@@ -341,17 +468,12 @@ async function saveGameToApi(gameId) {
       body: JSON.stringify(game),
     });
     setSaveStatus("✓ Đã lưu");
+    dirtyGames.clear();
     setTimeout(() => setSaveStatus(""), 2000);
   } catch (err) {
+    console.error("saveGameToApi error:", err);
     setSaveStatus(`Lỗi: ${err.message}`, true);
-  } finally {
-    pendingGameSave = null;
   }
-}
-
-function scheduleSave(gameId) {
-  clearTimeout(pendingGameSave);
-  pendingGameSave = setTimeout(() => saveGameToApi(gameId), 600);
 }
 
 // ─── Attendee operations ──────────────────────────────────────────────────────
@@ -392,7 +514,6 @@ async function clearAttendees() {
 async function refreshAttendees() {
   state.attendees = await adminFetch("/api/admin/attendees");
   renderAttendees();
-  renderSummaries();
 }
 
 // ─── Login / Logout ───────────────────────────────────────────────────────────
@@ -439,16 +560,21 @@ function handleLogout() {
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 async function bootAuth() {
   if (isLoggedIn()) {
+    // Show admin shell and loading placeholder immediately — don't wait for API
+    setLoggedIn(true);
+    adminOverviewGames.innerHTML = `<div class="empty-state">Đang tải dữ liệu...</div>`;
+    adminGamesList.innerHTML = `<div class="empty-state">Đang tải dữ liệu...</div>`;
+    attendeeList.innerHTML = `<div class="empty-state">Đang tải dữ liệu...</div>`;
+
     try {
       await fetchAdminState();
-      setLoggedIn(true);
       renderAdminApp();
       connectAdminWebSocket();
     } catch {
       clearToken();
       setLoggedIn(false);
       showLoginMode();
-      setAuthMessage("Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại.");
+      setAuthMessage("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.");
     }
   } else {
     showLoginMode();
@@ -485,6 +611,28 @@ document.addEventListener("click", async (event) => {
     }
     return;
   }
+
+  const saveBtn = event.target.closest('[data-action="save-game"]');
+  if (saveBtn) {
+    const gameId = saveBtn.dataset.gameId;
+    if (gameId) {
+      await saveGameToApi(gameId);
+      // Không gọi renderAdminGames() ở đây — saveGameToApi() tự cập nhật indicator
+    }
+    return;
+  }
+
+  const sizeBtn = event.target.closest("[data-bingo-size]");
+  if (sizeBtn) {
+    const card = sizeBtn.closest("[data-game-id]");
+    if (!card) return;
+    const gameId = card.dataset.gameId;
+    const size = sizeBtn.dataset.bingoSize;
+    updateLocalGameField(gameId, "bingoSize", size);
+    markDirty(gameId);
+    renderAdminGames();
+    return;
+  }
 });
 
 adminGamesList.addEventListener("input", (event) => {
@@ -495,7 +643,7 @@ adminGamesList.addEventListener("input", (event) => {
   const gameId = card.dataset.gameId;
   const value = event.target.type === "checkbox" ? event.target.checked : event.target.value;
   updateLocalGameField(gameId, field, value);
-  scheduleSave(gameId);
+  markDirty(gameId);
   // Re-render badge & bingo preview inline without full re-render
   if (field === "enabled") {
     const badge = card.querySelector(".badge");
@@ -506,25 +654,57 @@ adminGamesList.addEventListener("input", (event) => {
   }
   if (field === "bingoItems") {
     const game = state.games.find((g) => g.id === gameId);
-    const previewEl = card.querySelector(".bingo-preview, .empty-state");
-    if (previewEl && game) {
-      previewEl.outerHTML = renderBingoPreview(game.bingoItems);
+    if (!game) return;
+    const size = getBingoSize(game);
+    const hasFree = Boolean(game.bingoFreeSpace);
+    const adminSection = card.querySelector(".bingo-admin-section");
+    if (adminSection) {
+      // Update status text
+      const statusEl = adminSection.querySelector("#bingoItemStatus");
+      if (statusEl) {
+        const items = game.bingoItems || [];
+        const totalCells = size.rows * size.cols;
+        const neededItems = hasFree && size.rows % 2 === 1 && size.cols % 2 === 1 ? totalCells - 1 : totalCells;
+        const diff = neededItems - items.length;
+        let text = `${items.length} / ${neededItems} ô`;
+        if (diff > 0) text += ` — cần thêm ${diff} ô nữa`;
+        else if (diff < 0) text += ` — dư ${Math.abs(diff)} ô (sẽ bị ẩn khỏi bảng)`;
+        else text += ` — vừa đủ ✓`;
+        statusEl.textContent = text;
+        statusEl.className = `hint-text ${items.length < neededItems ? "bingo-status-warn" : items.length > neededItems ? "bingo-status-over" : "bingo-status-ok"}`;
+      }
+      // Update preview
+      const prevPreview = adminSection.querySelector(".bingo-board, .empty-state");
+      if (prevPreview) {
+        prevPreview.outerHTML = renderBingoPreview(game.bingoItems, size, hasFree);
+      }
     }
   }
 });
 
-adminGamesList.addEventListener("change", (event) => {
+
+
+document.addEventListener("change", (event) => {
   const field = event.target.dataset.field;
-  if (!field) return;
-  const card = event.target.closest("[data-game-id]");
-  if (!card) return;
-  const gameId = card.dataset.gameId;
-  const value = event.target.type === "checkbox" ? event.target.checked : event.target.value;
-  updateLocalGameField(gameId, field, value);
-  // Immediate save for checkboxes; textarea/inputs already debounced via input event
-  if (event.target.type === "checkbox") {
-    saveGameToApi(gameId);
-    renderAdminGames(); // refresh badge
+  if (field) {
+    const card = event.target.closest("[data-game-id]");
+    if (!card) return;
+    const gameId = card.dataset.gameId;
+    const value = event.target.type === "checkbox" ? event.target.checked : event.target.value;
+    updateLocalGameField(gameId, field, value);
+    markDirty(gameId);
+    return;
+  }
+
+  const freeCheck = event.target.closest("[data-bingo-free]");
+  if (freeCheck) {
+    const card = freeCheck.closest("[data-game-id]");
+    if (!card) return;
+    const gameId = card.dataset.gameId;
+    updateLocalGameField(gameId, "bingoFreeSpace", freeCheck.checked);
+    markDirty(gameId);
+    renderAdminGames();
+    return;
   }
 });
 

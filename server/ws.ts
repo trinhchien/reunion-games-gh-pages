@@ -10,21 +10,28 @@ const clients = new Set<WsClient>();
 
 export function addClient(ws: WsClient): void {
   clients.add(ws);
+  console.log(`🔌 WS client connected  (${clients.size} total)`);
 }
 
 export function removeClient(ws: WsClient): void {
   clients.delete(ws);
+  console.log(`🔌 WS client disconnected (${clients.size} remaining)`);
 }
 
 export function broadcast(event: string, data: unknown): void {
   const message = JSON.stringify({ event, data });
+  const n = clients.size;
+  if (n > 0) {
+    console.log(`📡 WS broadcast "${event}" → ${n} client(s) (${message.length}B)`);
+  }
   for (const ws of clients) {
-    try {
-      ws.send(message);
-    } catch {
-      // Remove stale connections silently
-      clients.delete(ws);
-    }
+    queueMicrotask(() => {
+      try {
+        ws.send(message);
+      } catch {
+        clients.delete(ws);
+      }
+    });
   }
 }
 

@@ -8,7 +8,7 @@ const players = new Hono();
  * Nếu SĐT đã tồn tại, cập nhật fingerprint và trả về thông tin hiện tại.
  * Lưu fingerprint từ User-Agent + IP để nhận dạng lần sau.
  */
-players.post("/join", async (c) => {
+players.post("/players/join", async (c) => {
   const { default: sql } = await import("../db");
 
   let body: { phone?: string; name?: string };
@@ -40,8 +40,12 @@ players.post("/join", async (c) => {
     RETURNING id, phone, name, created_at
   `;
 
+  console.log(`  👤 Player join: "${player.name || player.phone}" (id=${player.id})`);
   return c.json({ id: player.id, phone: player.phone, name: player.name });
 });
+
+/**
+ * GET /api/attendees
 
 /**
  * GET /api/attendees

@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { SignJWT } from "jose";
 import bcrypt from "bcryptjs";
 import { adminAuth } from "../middleware/auth";
+import { queryWithTimeout } from "../db";
 
 const admin = new Hono();
 
@@ -14,20 +15,31 @@ function getSecret(): Uint8Array {
 }
 
 async function broadcastFullState() {
-  const { default: sql } = await import("../db");
-  const { broadcast } = await import("../ws");
+  try {
+    const { default: sql } = await import("../db");
+    const { broadcast } = await import("../ws");
 
-  const [games, attendees] = await Promise.all([
-    sql`SELECT id, title, duration, enabled, objective, supplies, notes, extra, sort_order FROM games ORDER BY sort_order`,
-    sql`SELECT id, name, excluded, created_at FROM attendees ORDER BY created_at ASC`,
-  ]);
+    const [games, attendees] = await Promise.all([
+      sql`SELECT id, title, duration, enabled, objective, supplies, notes, extra, sort_order FROM games ORDER BY sort_order`,
+      sql`SELECT id, name, excluded, created_at FROM attendees ORDER BY created_at ASC`,
+    ]);
 
-  const mappedGames = games.map((g) => ({
-    ...g,
-    bingoItems: (g.extra as Record<string, unknown>)?.bingoItems ?? undefined,
-  }));
+    const mappedGames = games.map((g) => {
+      // Guard: extra must be an object — spreading a string causes corruption
+      const rawExtra = g.extra;
+      const extra = (typeof rawExtra === 'object' && rawExtra !== null ? rawExtra : {}) as Record<string, unknown>;
+      return {
+        ...g,
+        bingoItems: extra.bingoItems ?? undefined,
+        bingoSize: extra.bingoSize ?? undefined,
+        bingoFreeSpace: extra.bingoFreeSpace ?? undefined,
+      };
+    });
 
-  broadcast("state_update", { games: mappedGames, attendees });
+    broadcast("state_update", { games: mappedGames, attendees });
+  } catch (err) {
+    console.error("broadcastFullState failed:", err);
+  }
 }
 
 // ─── Auth Routes (public) ────────────────────────────────────────────────────
@@ -56,11 +68,13 @@ admin.post("/auth/login", async (c) => {
   `;
 
   if (!adminUser) {
+    console.log(`🔐 Login failed — unknown user "${username}"`);
     return c.json({ error: "Sai tên đăng nhập hoặc mật khẩu" }, 401);
   }
 
   const valid = await bcrypt.compare(password, adminUser.password_hash as string);
   if (!valid) {
+    console.log(`🔐 Login failed — wrong password for "${username}"`);
     return c.json({ error: "Sai tên đăng nhập hoặc mật khẩu" }, 401);
   }
 
@@ -73,6 +87,7 @@ admin.post("/auth/login", async (c) => {
     .setExpirationTime("24h")
     .sign(getSecret());
 
+  console.log(`🔐 Login OK — "${username}" got token`);
   return c.json({ token, username: adminUser.username });
 });
 
@@ -108,6 +123,8 @@ admin.get("/games", adminAuth, async (c) => {
     supplies: g.supplies,
     notes: g.notes,
     bingoItems: (g.extra as Record<string, unknown>)?.bingoItems ?? undefined,
+    bingoSize: (g.extra as Record<string, unknown>)?.bingoSize ?? undefined,
+    bingoFreeSpace: (g.extra as Record<string, unknown>)?.bingoFreeSpace ?? undefined,
     sort_order: g.sort_order,
   }));
   return c.json(result);
@@ -129,6 +146,8 @@ admin.put("/games/:id", adminAuth, async (c) => {
     supplies?: string;
     notes?: string;
     bingoItems?: string[];
+    bingoSize?: { rows: number; cols: number } | null;
+    bingoFreeSpace?: boolean | null;
   };
   try {
     body = await c.req.json();
@@ -136,30 +155,68 @@ admin.put("/games/:id", adminAuth, async (c) => {
     return c.json({ error: "Invalid JSON body" }, 400);
   }
 
-  // Build extra JSONB from bingoItems
-  const existingRow = await sql`SELECT extra FROM games WHERE id = ${gameId}`;
-  if (!existingRow.length) return c.json({ error: "Game not found" }, 404);
+  try {
+    // Validate bingoItems — must be array of strings, not corrupted object
+    if (body.bingoItems !== undefined) {
+      if (!Array.isArray(body.bingoItems)) {
+        return c.json({ error: "bingoItems phải là một mảng các chuỗi" }, 400);
+      }
+      for (const item of body.bingoItems) {
+        if (typeof item !== "string") {
+          return c.json({ error: "bingoItems chỉ được chứa chuỗi ký tự" }, 400);
+        }
+      }
+      // Sanity check: reject absurdly large data (more than 5000 items or 500KB serialized)
+      if (body.bingoItems.length > 5000) {
+        return c.json({ error: "bingoItems quá nhiều ô (tối đa 5000)" }, 400);
+      }
+    }
 
-  const existingExtra = (existingRow[0].extra as Record<string, unknown>) ?? {};
-  const newExtra = body.bingoItems !== undefined
-    ? { ...existingExtra, bingoItems: body.bingoItems }
-    : existingExtra;
+    const existingRow = await queryWithTimeout(
+      sql`SELECT extra FROM games WHERE id = ${gameId}`
+    );
+    if (!existingRow.length) return c.json({ error: "Game not found" }, 404);
 
-  await sql`
-    UPDATE games SET
-      title     = COALESCE(${body.title ?? null}, title),
-      duration  = COALESCE(${body.duration ?? null}, duration),
-      enabled   = COALESCE(${body.enabled ?? null}, enabled),
-      objective = COALESCE(${body.objective ?? null}, objective),
-      supplies  = COALESCE(${body.supplies ?? null}, supplies),
-      notes     = COALESCE(${body.notes ?? null}, notes),
-      extra     = ${JSON.stringify(newExtra)}::jsonb,
-      updated_at = now()
-    WHERE id = ${gameId}
-  `;
+    // Guard: extra must be an object — spreading a string causes corruption
+    const rawExtra = existingRow[0].extra;
+    const existingExtra = (typeof rawExtra === 'object' && rawExtra !== null ? rawExtra : {}) as Record<string, unknown>;
+    let newExtra = { ...existingExtra };
+    if (body.bingoItems !== undefined) {
+      newExtra.bingoItems = body.bingoItems;
+    }
+    if (body.bingoSize !== undefined) {
+      newExtra.bingoSize = body.bingoSize;
+    }
+    if (body.bingoFreeSpace !== undefined) {
+      newExtra.bingoFreeSpace = body.bingoFreeSpace;
+    }
 
-  await broadcastFullState();
-  return c.json({ ok: true });
+    const extraJson = JSON.stringify(newExtra);
+    // Reject serialized extra > 500KB to prevent DB bloat
+    if (extraJson.length > 500 * 1024) {
+      console.error(`PUT /games/:id rejected: extra too large (${(extraJson.length / 1024).toFixed(1)}KB)`);
+      return c.json({ error: "Dữ liệu quá lớn, vui lòng giảm bớt nội dung" }, 413);
+    }
+
+    await queryWithTimeout(sql`
+      UPDATE games SET
+        title      = COALESCE(${body.title ?? null}, title),
+        duration   = COALESCE(${body.duration ?? null}, duration),
+        enabled    = COALESCE(${body.enabled ?? null}, enabled),
+        objective  = COALESCE(${body.objective ?? null}, objective),
+        supplies   = COALESCE(${body.supplies ?? null}, supplies),
+        notes      = COALESCE(${body.notes ?? null}, notes),
+        extra      = ${extraJson}::jsonb,
+        updated_at = now()
+      WHERE id = ${gameId}
+    `);
+
+    await broadcastFullState();
+    return c.json({ ok: true });
+  } catch (err) {
+    console.error("PUT /games/:id failed:", err);
+    return c.json({ error: "Lưu thất bại, vui lòng thử lại" }, 500);
+  }
 });
 
 // ─── Attendees CRUD (admin protected) ────────────────────────────────────────

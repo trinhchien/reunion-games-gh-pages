@@ -15,10 +15,18 @@ const PORT = Number(process.env.PORT) || 3000;
 // ─── Hono App ────────────────────────────────────────────────────────────────
 const app = new Hono();
 
-// CORS headers for local dev (Cloudflare handles HTTPS in prod)
+// ─── Request log ──────────────────────────────────────────────────────────────
 app.use("*", async (c, next) => {
+  const start = performance.now();
   await next();
-  c.res.headers.set("X-Powered-By", "reunion-games");
+  const ms = (performance.now() - start).toFixed(0);
+  const len = c.res.headers.get("content-length") ?? "-";
+  const emoji =
+    c.res.status >= 500 ? "❌" :
+    c.res.status >= 400 ? "⚠️" :
+    c.res.status >= 300 ? "↪️" :
+    "✅";
+  console.log(`${emoji} ${c.req.method} ${c.req.path} ${c.res.status} ${ms}ms ${len}B`);
 });
 
 // ─── API Routes ──────────────────────────────────────────────────────────────

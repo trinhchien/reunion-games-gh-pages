@@ -32,8 +32,11 @@ turns.post("/spin", async (c) => {
   `;
 
   if (eligible.length === 0) {
+    console.log("  🎡 Spin failed — empty pool");
     return c.json({ error: "Không có người hợp lệ trong pool quay" }, 400);
   }
+
+  console.log(`  🎡 Spinning from ${eligible.length} eligible`);
 
   // Pick random winner
   const winnerIndex = Math.floor(Math.random() * eligible.length);

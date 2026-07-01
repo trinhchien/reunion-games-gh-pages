@@ -1,33 +1,80 @@
-# Reunion Games GitHub Pages
+# Reunion Games
 
-Microsite HTML tĩnh để tổ chức họp lớp kỷ niệm 10 năm ra trường, bao gồm:
+Web application tổ chức họp lớp kỷ niệm 10 năm ra trường — có backend server, realtime WebSocket và cơ sở dữ liệu PostgreSQL.
 
-- Trang tổng quan chương trình và danh sách game
-- Tab admin để cấu hình từng game
+## Tính năng
+
+- Trang tổng quan chương trình và danh sách game (công khai)
+- Trang admin có xác thực JWT để cấu hình từng game
 - Quản lý danh sách người tham dự
-- Vòng quay may mắn dùng chung dữ liệu người tham dự
+- Vòng quay may mắn đồng bộ realtime qua WebSocket
+- Người tham dự có thể đăng ký bằng số điện thoại
+- Đồng bộ dữ liệu giữa nhiều thiết bị (trình chiếu + người dùng)
 
-## Nội dung admin
+## Cấu trúc thư mục
 
-- Bật tắt game
-- Sửa tên game, thời lượng, mục tiêu, đạo cụ, ghi chú
-- Thêm nhanh người tham dự
-- Import nhanh từ danh sách text
-- Xóa tất cả danh sách
-- Ẩn người đã trúng khỏi pool quay và mở lại khi cần
+```
+├── public/                  # Static frontend files (served by server)
+│   ├── index.html           # Trang công khai
+│   ├── admin.html           # Trang quản trị
+│   ├── style.css            # Styles
+│   ├── script.js            # Frontend logic (public)
+│   └── admin.js             # Frontend logic (admin)
+├── server/                  # Backend
+│   ├── index.ts             # Entry point (Hono + Bun)
+│   ├── db.ts                # PostgreSQL connection
+│   ├── schema.sql           # Database schema
+│   ├── seed-admin.ts        # Seed admin user
+│   ├── ws.ts                # WebSocket broadcast
+│   ├── middleware/auth.ts   # JWT auth middleware
+│   └── routes/              # API routes
+│       ├── admin.ts
+│       ├── games.ts
+│       ├── players.ts
+│       └── turns.ts
+├── cloudflared/             # Cloudflare Tunnel config
+└── docker-compose.yml       # PostgreSQL container
+```
+
+## Yêu cầu
+
+- [Bun](https://bun.sh) 1.1+
+- Docker (cho PostgreSQL)
 
 ## Cách chạy local
 
-Mở file `index.html` trong trình duyệt.
+```bash
+# 1. Khởi động PostgreSQL
+docker compose up -d
 
-## Deploy lên GitHub Pages
+# 2. Seed admin user (lần đầu)
+bun run seed
 
-1. Tạo repository mới trên GitHub.
-2. Đẩy toàn bộ nội dung thư mục này lên branch `main`.
-3. Vào `Settings` > `Pages`.
-4. Chọn deploy từ branch `main`, folder `/root`.
-5. Lưu lại và đợi GitHub Pages build xong.
+# 3. Khởi động server
+bun run dev
+```
 
-## Ghi chú
+Server sẽ chạy tại `http://localhost:3000`.
 
-Dữ liệu được lưu bằng `localStorage`, vì vậy mỗi trình duyệt sẽ có bộ dữ liệu riêng.
+### Biến môi trường
+
+Tạo file `.env` trong thư mục gốc:
+
+```env
+DATABASE_URL=postgres://reunion:changeme@localhost:5432/reunion
+JWT_SECRET=thay-doi-me-ket-nay
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=thay-doi-mat-khau
+```
+
+## Deploy
+
+Sử dụng Cloudflare Tunnel (xem `cloudflared/config.yml`) hoặc deploy lên VPS bất kỳ với Bun.
+
+## Công nghệ
+
+- **Backend:** [Hono](https://hono.dev) + [Bun](https://bun.sh)
+- **Database:** PostgreSQL 16
+- **Auth:** JWT (jose) + bcryptjs
+- **Realtime:** WebSocket (Hono Bun adapter)
+- **Frontend:** Vanilla JS, DOM-driven
