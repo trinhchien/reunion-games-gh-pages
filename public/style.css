@@ -765,6 +765,14 @@ textarea {
   display: flex;
 }
 
+.player-modal.is-required {
+  pointer-events: auto;
+}
+
+.player-modal.is-required .player-modal-card {
+  animation: modal-in 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
 .player-modal-card {
   position: relative;
   width: 100%;
@@ -821,6 +829,17 @@ textarea {
 
 .modal-close:hover {
   background: rgba(0, 0, 0, 0.12);
+}
+
+.gate-locked {
+  text-align: center;
+  padding: 40px 20px;
+}
+
+.gate-locked p {
+  color: var(--muted);
+  margin-bottom: 20px;
+  font-size: 1.05rem;
 }
 
 /* ─── Save Bar ──────────────────────────────────────────────────────────────── */

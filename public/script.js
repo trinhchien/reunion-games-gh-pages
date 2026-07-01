@@ -182,12 +182,30 @@ function renderBingoPreview(items, size, hasFreeSpace) {
 }
 
 function renderGamePanel(game) {
+  if (!playerSession) {
+    return `
+      <section class="tab-panel ${activePublicTab === game.id ? "is-active" : ""}" data-tab-panel="${game.id}">
+        <section class="section">
+          <div class="panel">
+            <div class="section-heading compact">
+              <h2>${escapeHtml(game.title)}</h2>
+            </div>
+            <div class="gate-locked">
+              <p>Bạn cần nhập số điện thoại để tham gia trò chơi.</p>
+              <button class="button" type="button" id="gateJoinBtn">Nhập số điện thoại</button>
+            </div>
+          </div>
+        </section>
+      </section>
+    `;
+  }
+
   if (game.id === "bingo") {
     // Shuffle items so each user/view sees a random board
     const shuffledItems = getShuffledBingoItems(game.bingoItems);
     return `
       <section class="tab-panel ${activePublicTab === game.id ? "is-active" : ""}" data-tab-panel="${game.id}">
-        <section class="section split-section">
+        <section class="section">
           <div class="panel">
             <div class="section-heading compact">
               <p class="eyebrow">Bingo riêng</p>
@@ -199,19 +217,34 @@ function renderGamePanel(game) {
             </div>
             ${renderBingoPreview(shuffledItems, getBingoSize(game), Boolean(game.bingoFreeSpace))}
           </div>
+        </section>
+      </section>
+    `;
+  }
 
-          <div class="panel">
+  if (game.id === "wheel") {
+    return `
+      <section class="tab-panel wheel-panel-inner ${activePublicTab === game.id ? "is-active" : ""}" data-tab-panel="${game.id}">
+        <section class="section split-section wheel-layout">
+          <div class="panel wheel-panel">
             <div class="section-heading compact">
-              <p class="eyebrow">Cách chơi</p>
-              <h2>Gợi ý triển khai</h2>
+              <p class="eyebrow">Lucky wheel</p>
+              <h2>${escapeHtml(game.title)}</h2>
             </div>
-            <ul class="checklist">
-              <li>Mỗi người nhận 1 phiếu bingo với các ô ký ức khác nhau.</li>
-              <li>Người chơi đi tìm bạn phù hợp với từng ô và xin xác nhận.</li>
-              <li>Ai hoàn thành một hàng ngang, dọc hoặc chéo trước sẽ hô "Bingo".</li>
-              <li>Nội dung ô bingo được ban tổ chức cập nhật từ trang admin riêng.</li>
-              <li>Nên chọn ô đủ vui nhưng không quá riêng tư để ai cũng dễ tham gia.</li>
-            </ul>
+            <p>${escapeHtml(game.objective)}</p>
+            <div class="wheel-stage">
+              <canvas id="wheelCanvas" width="520" height="520" aria-label="Vòng quay may mắn"></canvas>
+              <div class="wheel-pointer"></div>
+            </div>
+            <div class="inline-actions">
+              <button class="button" id="spinWheelBtn" type="button">Quay ngay</button>
+              <button class="button button-secondary" id="resetWinnersBtn" type="button">Mở lại tất cả</button>
+            </div>
+            <label class="toggle-row">
+              <input id="removeWinnerToggle" type="checkbox" checked />
+              <span>Tự động ẩn người đã trúng khỏi lần quay sau</span>
+            </label>
+            <div class="winner-box" id="winnerBox">Chưa có kết quả. Hãy quay để chọn người may mắn.</div>
           </div>
         </section>
       </section>
@@ -220,7 +253,7 @@ function renderGamePanel(game) {
 
   return `
     <section class="tab-panel ${activePublicTab === game.id ? "is-active" : ""}" data-tab-panel="${game.id}">
-      <section class="section split-section">
+      <section class="section">
         <div class="panel">
           <div class="section-heading compact">
             <p class="eyebrow">Game đang bật</p>
@@ -234,61 +267,6 @@ function renderGamePanel(game) {
             <li>Đạo cụ: ${escapeHtml(game.supplies)}</li>
             <li>Ghi chú: ${escapeHtml(game.notes)}</li>
           </ul>
-        </div>
-
-        <div class="panel">
-          <div class="section-heading compact">
-            <p class="eyebrow">Gợi ý vận hành</p>
-            <h2>Cách dùng trong buổi họp lớp</h2>
-          </div>
-          <ul class="checklist">
-            <li>MC giới thiệu nhanh luật chơi trước khi bắt đầu.</li>
-            <li>Cho người chơi 30-60 giây để hiểu rõ mục tiêu và cách tính thắng.</li>
-            <li>Chuẩn bị sẵn đạo cụ và người hỗ trợ để tránh ngắt mạch chương trình.</li>
-            <li>Nếu số lượng người thay đổi, ban tổ chức có thể cập nhật lại trong trang admin.</li>
-          </ul>
-        </div>
-      </section>
-    </section>
-  `;
-}
-
-function renderWheelPanelContent() {
-  const eligibleCount = getEligibleAttendees().length;
-  return `
-    <section class="tab-panel wheel-panel-inner">
-      <section class="section split-section wheel-layout">
-        <div class="panel wheel-panel">
-          <div class="section-heading compact">
-            <p class="eyebrow">Lucky wheel</p>
-            <h2>Vòng quay may mắn</h2>
-          </div>
-          <p>Lấy dữ liệu từ danh sách tham dự trong trang admin. Có thể loại người đã trúng để tránh lặp lại.</p>
-          <div class="wheel-stage">
-            <canvas id="wheelCanvas" width="520" height="520" aria-label="Vòng quay may mắn"></canvas>
-            <div class="wheel-pointer"></div>
-          </div>
-          <div class="inline-actions">
-            <button class="button" id="spinWheelBtn" type="button">Quay ngay</button>
-            <button class="button button-secondary" id="resetWinnersBtn" type="button">Mở lại tất cả</button>
-          </div>
-          <label class="toggle-row">
-            <input id="removeWinnerToggle" type="checkbox" checked />
-            <span>Tự động ẩn người đã trúng khỏi lần quay sau</span>
-          </label>
-          <div class="winner-box" id="winnerBox">Chưa có kết quả. Hãy quay để chọn người may mắn.</div>
-        </div>
-
-        <div class="panel">
-          <div class="section-heading compact">
-            <p class="eyebrow">Trạng thái pool</p>
-            <h2>Danh sách đang tham gia vòng quay</h2>
-          </div>
-          <div class="admin-subhead">
-            <strong>Pool hợp lệ</strong>
-            <span id="eligibleCountLabel">${eligibleCount} người sẵn sàng</span>
-          </div>
-          <div class="attendee-list" id="eligibleList"></div>
         </div>
       </section>
     </section>
@@ -308,6 +286,16 @@ function renderPublicTabs() {
   if (gamesChanged) {
     lastEnabledGameIds = newIds;
 
+    publicTabStrip.innerHTML = enabledGames
+      .map(
+        (game) => `
+          <button class="tab-chip ${activePublicTab === game.id ? "is-active" : ""}" type="button" data-tab-target="${game.id}">
+            ${escapeHtml(game.title)}
+          </button>
+        `
+      )
+      .join("");
+
     heroGameActions.innerHTML = enabledGames
       .slice(0, 2)
       .map(
@@ -321,22 +309,6 @@ function renderPublicTabs() {
           </button>
         `
       )
-      .concat(
-        `<button class="button button-secondary" type="button" data-tab-target="wheel">Vòng quay</button>`
-      )
-      .join("");
-
-    publicTabStrip.innerHTML = enabledGames
-      .map(
-        (game) => `
-          <button class="tab-chip ${activePublicTab === game.id ? "is-active" : ""}" type="button" data-tab-target="${game.id}">
-            ${escapeHtml(game.title)}
-          </button>
-        `
-      )
-      .concat(
-        `<button class="tab-chip ${activePublicTab === "wheel" ? "is-active" : ""}" type="button" data-tab-target="wheel">Vòng quay may mắn</button>`
-      )
       .join("");
   } else {
     // Just update active tab chip
@@ -346,48 +318,7 @@ function renderPublicTabs() {
     });
   }
 
-  // Only rebuild the active panel, not all panels
-  const existingPanel = publicPanels.querySelector(`[data-tab-panel="${activePublicTab}"]`);
-  if (!existingPanel) {
-    publicPanels.innerHTML = enabledGames.map(renderGamePanel).join("") + renderWheelPanelContent();
-  } else {
-    // Update the active panel in-place
-    const game = enabledGames.find(g => g.id === activePublicTab);
-    if (game) {
-      const newHtml = renderGamePanel(game);
-      if (existingPanel.outerHTML !== newHtml) {
-        existingPanel.outerHTML = newHtml;
-      }
-    } else if (activePublicTab === "wheel") {
-      const newHtml = renderWheelPanelContent();
-      if (existingPanel.outerHTML !== newHtml) {
-        existingPanel.outerHTML = newHtml;
-      }
-    }
-  }
-}
-
-function renderEligibleList() {
-  const eligibleList = document.getElementById("eligibleList");
-  const eligibleCountLabel = document.getElementById("eligibleCountLabel");
-  if (!eligibleList || !eligibleCountLabel) return;
-
-  const eligible = getEligibleAttendees();
-  eligibleCountLabel.textContent = `${eligible.length} người sẵn sàng`;
-  eligibleList.innerHTML = eligible.length
-    ? eligible
-        .map(
-          (a) => `
-            <div class="attendee-item">
-              <div>
-                <div class="attendee-name">${escapeHtml(a.name)}</div>
-                <div class="attendee-status">Sẵn sàng tham gia vòng quay</div>
-              </div>
-            </div>
-          `
-        )
-        .join("")
-    : `<div class="empty-state">Không còn ai trong pool quay. Vào trang admin để mở lại danh sách.</div>`;
+  publicPanels.innerHTML = enabledGames.map(renderGamePanel).join("");
 }
 
 // ─── Wheel Drawing ────────────────────────────────────────────────────────────
@@ -545,15 +476,11 @@ function setupPlayerModal() {
 
   if (!joinBtn || !modal) return;
 
-  // Restore session
-  const saved = sessionStorage.getItem("reunion-player-session");
-  if (saved) {
-    try {
-      playerSession = JSON.parse(saved);
-      updateJoinButton();
-    } catch {
-      sessionStorage.removeItem("reunion-player-session");
-    }
+  if (!playerSession) {
+    modal.classList.add("is-open", "is-required");
+    if (closeBtn) closeBtn.classList.add("hidden");
+  } else {
+    updateJoinButton();
   }
 
   joinBtn.addEventListener("click", () => {
@@ -564,7 +491,9 @@ function setupPlayerModal() {
   closeBtn?.addEventListener("click", () => modal.classList.remove("is-open"));
 
   modal.addEventListener("click", (e) => {
-    if (e.target === modal) modal.classList.remove("is-open");
+    if (e.target === modal && !modal.classList.contains("is-required")) {
+      modal.classList.remove("is-open");
+    }
   });
 
   form?.addEventListener("submit", async (e) => {
@@ -582,9 +511,12 @@ function setupPlayerModal() {
         body: JSON.stringify({ phone, name }),
       });
       playerSession = player;
-      sessionStorage.setItem("reunion-player-session", JSON.stringify(player));
+      localStorage.setItem("reunion-player-session", JSON.stringify(player));
       statusEl.textContent = `✅ Chào ${player.name || player.phone}!`;
       updateJoinButton();
+      modal.classList.remove("is-required");
+      if (closeBtn) closeBtn.classList.remove("hidden");
+      renderAll();
       setTimeout(() => modal.classList.remove("is-open"), 1500);
     } catch (err) {
       statusEl.textContent = `Lỗi: ${err.message}`;
@@ -606,7 +538,6 @@ function updateJoinButton() {
 // ─── Event Wiring ─────────────────────────────────────────────────────────────
 function renderAll() {
   renderPublicTabs();
-  renderEligibleList();
   if (activePublicTab === "wheel") {
     drawWheel();
   }
@@ -631,10 +562,25 @@ document.addEventListener("click", (event) => {
     resetExcluded();
     return;
   }
+
+  const gateBtn = event.target.closest("#gateJoinBtn");
+  if (gateBtn) {
+    const modal = document.getElementById("playerModal");
+    if (modal) {
+      modal.classList.add("is-open");
+      const phoneInput = document.getElementById("playerPhoneInput");
+      phoneInput?.focus();
+    }
+    return;
+  }
 });
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
 (async () => {
+  const saved = localStorage.getItem("reunion-player-session");
+  if (saved) {
+    try { playerSession = JSON.parse(saved); } catch { localStorage.removeItem("reunion-player-session"); }
+  }
   await fetchState();
   renderAll();
   connectWebSocket();

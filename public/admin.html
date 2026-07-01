@@ -62,52 +62,14 @@
           <div class="games-grid" id="adminOverviewGames"></div>
         </section>
 
-        <section class="section split-section admin-layout">
-          <div class="panel">
-            <div class="section-heading compact">
-              <p class="eyebrow">Admin</p>
-              <h2>Cấu hình từng game</h2>
-            </div>
-            <p>Bật tắt game, sửa thời lượng, mục tiêu, đạo cụ và ghi chú để phù hợp địa điểm thực tế.</p>
-            <div class="admin-game-tabs" id="adminGameTabs"></div>
-            <div class="admin-list" id="adminGamesList"></div>
+        <section class="section">
+          <div class="section-heading">
+            <p class="eyebrow">Admin</p>
+            <h2>Cấu hình từng game</h2>
           </div>
-
-          <div class="panel">
-            <div class="section-heading compact">
-              <p class="eyebrow">Người tham dự</p>
-              <h2>Quản lý danh sách dùng cho vòng quay</h2>
-            </div>
-            <form class="stack-form" id="attendeeForm">
-              <label class="field">
-                <span>Thêm nhanh một người</span>
-                <div class="input-row">
-                  <input id="attendeeNameInput" type="text" placeholder="Nhập tên người tham dự" />
-                  <button class="button" type="submit">Thêm</button>
-                </div>
-              </label>
-            </form>
-
-            <label class="field">
-              <span>Import nhanh từ danh sách người tham dự</span>
-              <textarea
-                id="bulkImportInput"
-                rows="7"
-                placeholder="Mỗi dòng một tên&#10;Nguyễn Văn A&#10;Trần Thị B&#10;Lê Minh C"
-              ></textarea>
-            </label>
-
-            <div class="inline-actions">
-              <button class="button" id="importAttendeesBtn" type="button">Import danh sách</button>
-              <button class="button button-secondary" id="clearAttendeesBtn" type="button">Xóa tất cả</button>
-            </div>
-
-            <div class="admin-subhead">
-              <strong>Danh sách hiện tại</strong>
-              <span id="attendeeCountLabel">0 người</span>
-            </div>
-            <div class="attendee-list" id="attendeeList"></div>
-          </div>
+          <p>Bật tắt game, sửa thời lượng, mục tiêu, đạo cụ và ghi chú để phù hợp địa điểm thực tế. Với vòng quay may mắn, có thể quản lý danh sách tham dự ngay trong tab game.</p>
+          <div class="admin-game-tabs" id="adminGameTabs"></div>
+          <div class="admin-list" id="adminGamesList"></div>
         </section>
       </main>
     </div>

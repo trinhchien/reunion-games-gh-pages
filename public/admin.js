@@ -133,13 +133,63 @@ const logoutBtn = document.getElementById("logoutBtn");
 const adminOverviewGames = document.getElementById("adminOverviewGames");
 const adminGameTabs = document.getElementById("adminGameTabs");
 const adminGamesList = document.getElementById("adminGamesList");
-const attendeeList = document.getElementById("attendeeList");
-const attendeeForm = document.getElementById("attendeeForm");
-const attendeeNameInput = document.getElementById("attendeeNameInput");
-const bulkImportInput = document.getElementById("bulkImportInput");
-const importAttendeesBtn = document.getElementById("importAttendeesBtn");
-const clearAttendeesBtn = document.getElementById("clearAttendeesBtn");
-const attendeeCountLabel = document.getElementById("attendeeCountLabel");
+
+// Attendee refs are rebindable — they're inside the wheel tab which re-renders.
+let attendeeList = null;
+let attendeeForm = null;
+let attendeeNameInput = null;
+let bulkImportInput = null;
+let importAttendeesBtn = null;
+let clearAttendeesBtn = null;
+let attendeeCountLabel = null;
+let attendeesWired = false;
+
+function bindAttendeeDomRefs() {
+  attendeeList = document.getElementById("attendeeList");
+  attendeeForm = document.getElementById("attendeeForm");
+  attendeeNameInput = document.getElementById("attendeeNameInput");
+  bulkImportInput = document.getElementById("bulkImportInput");
+  importAttendeesBtn = document.getElementById("importAttendeesBtn");
+  clearAttendeesBtn = document.getElementById("clearAttendeesBtn");
+  attendeeCountLabel = document.getElementById("attendeeCountLabel");
+
+  if (attendeesWired) return;
+  if (!attendeeForm) return;
+  attendeesWired = true;
+
+  attendeeForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const name = attendeeNameInput?.value.trim();
+    if (!name) return;
+    try {
+      await addAttendee(name);
+      if (attendeeNameInput) attendeeNameInput.value = "";
+    } catch (err) {
+      alert(`Lỗi thêm người tham dự: ${err.message}`);
+    }
+  });
+
+  importAttendeesBtn?.addEventListener("click", async () => {
+    const raw = bulkImportInput?.value || "";
+    const names = raw.split(/\r?\n|,/).map((n) => n.trim()).filter(Boolean);
+    if (!names.length) return;
+    try {
+      const result = await importAttendees(names);
+      if (bulkImportInput) bulkImportInput.value = "";
+      alert(`Đã thêm ${result.added} người. Bỏ qua ${result.skipped} trùng lặp.`);
+    } catch (err) {
+      alert(`Lỗi import: ${err.message}`);
+    }
+  });
+
+  clearAttendeesBtn?.addEventListener("click", async () => {
+    try {
+      await clearAttendees();
+    } catch (err) {
+      alert(`Lỗi xóa danh sách: ${err.message}`);
+    }
+  });
+}
 
 // ─── Auth UI ──────────────────────────────────────────────────────────────────
 function setAuthMessage(message, isError = false) {
@@ -317,6 +367,46 @@ function ensureGameSelection() {
   }
 }
 
+function renderWheelAttendees() {
+  return `
+    <div class="field field-full wheel-attendee-section">
+      <hr class="bingo-divider" />
+      <span>Danh sách tham dự vòng quay may mắn</span>
+      <p class="hint-text">Người trong danh sách này sẽ là pool quay. Có thể ẩn người đã trúng khỏi lần quay sau.</p>
+
+      <form class="stack-form" id="attendeeForm">
+        <label class="field">
+          <span>Thêm nhanh một người</span>
+          <div class="input-row">
+            <input id="attendeeNameInput" type="text" placeholder="Nhập tên người tham dự" />
+            <button class="button" type="submit">Thêm</button>
+          </div>
+        </label>
+      </form>
+
+      <label class="field">
+        <span>Import nhanh từ danh sách người tham dự</span>
+        <textarea
+          id="bulkImportInput"
+          rows="7"
+          placeholder="Mỗi dòng một tên&#10;Nguyễn Văn A&#10;Trần Thị B&#10;Lê Minh C"
+        ></textarea>
+      </label>
+
+      <div class="inline-actions">
+        <button class="button" id="importAttendeesBtn" type="button">Import danh sách</button>
+        <button class="button button-secondary" id="clearAttendeesBtn" type="button">Xóa tất cả</button>
+      </div>
+
+      <div class="admin-subhead">
+        <strong>Danh sách hiện tại</strong>
+        <span id="attendeeCountLabel">0 người</span>
+      </div>
+      <div class="attendee-list" id="attendeeList"></div>
+    </div>
+  `;
+}
+
 function renderAdminGames() {
   ensureGameSelection();
 
@@ -372,6 +462,7 @@ function renderAdminGames() {
           <textarea rows="3" data-field="notes">${escapeHtml(game.notes)}</textarea>
         </label>
         ${renderBingoAdmin(game)}
+        ${game.id === "wheel" ? renderWheelAttendees() : ""}
       </div>
 
       <label class="toggle-row">
@@ -385,9 +476,15 @@ function renderAdminGames() {
       </div>
     </article>
   `;
+
+  if (game.id === "wheel") {
+    bindAttendeeDomRefs();
+    renderAttendees();
+  }
 }
 
 function renderAttendees() {
+  if (!attendeeList || !attendeeCountLabel) return;
   attendeeCountLabel.textContent = `${state.attendees.length} người`;
 
   if (!state.attendees.length) {
@@ -467,8 +564,11 @@ async function saveGameToApi(gameId) {
       method: "PUT",
       body: JSON.stringify(game),
     });
-    setSaveStatus("✓ Đã lưu");
     dirtyGames.clear();
+    const fresh = await adminFetch("/api/admin/games");
+    if (Array.isArray(fresh)) state.games = fresh;
+    scheduleAdminRender();
+    setSaveStatus("✓ Đã lưu");
     setTimeout(() => setSaveStatus(""), 2000);
   } catch (err) {
     console.error("saveGameToApi error:", err);
@@ -564,7 +664,6 @@ async function bootAuth() {
     setLoggedIn(true);
     adminOverviewGames.innerHTML = `<div class="empty-state">Đang tải dữ liệu...</div>`;
     adminGamesList.innerHTML = `<div class="empty-state">Đang tải dữ liệu...</div>`;
-    attendeeList.innerHTML = `<div class="empty-state">Đang tải dữ liệu...</div>`;
 
     try {
       await fetchAdminState();
@@ -705,39 +804,6 @@ document.addEventListener("change", (event) => {
     markDirty(gameId);
     renderAdminGames();
     return;
-  }
-});
-
-attendeeForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const name = attendeeNameInput.value.trim();
-  if (!name) return;
-  try {
-    await addAttendee(name);
-    attendeeNameInput.value = "";
-  } catch (err) {
-    alert(`Lỗi thêm người tham dự: ${err.message}`);
-  }
-});
-
-importAttendeesBtn.addEventListener("click", async () => {
-  const raw = bulkImportInput.value;
-  const names = raw.split(/\r?\n|,/).map((n) => n.trim()).filter(Boolean);
-  if (!names.length) return;
-  try {
-    const result = await importAttendees(names);
-    bulkImportInput.value = "";
-    alert(`Đã thêm ${result.added} người. Bỏ qua ${result.skipped} trùng lặp.`);
-  } catch (err) {
-    alert(`Lỗi import: ${err.message}`);
-  }
-});
-
-clearAttendeesBtn.addEventListener("click", async () => {
-  try {
-    await clearAttendees();
-  } catch (err) {
-    alert(`Lỗi xóa danh sách: ${err.message}`);
   }
 });
 

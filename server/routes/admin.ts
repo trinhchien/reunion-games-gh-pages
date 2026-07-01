@@ -8,6 +8,13 @@ const admin = new Hono();
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
+function parseExtra(raw: unknown): Record<string, unknown> {
+  if (typeof raw === 'string') {
+    try { return JSON.parse(raw) as Record<string, unknown>; } catch { return {}; }
+  }
+  return (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>;
+}
+
 function getSecret(): Uint8Array {
   const jwtSecret = process.env.JWT_SECRET;
   if (!jwtSecret) throw new Error("JWT_SECRET not set");
@@ -25,9 +32,7 @@ async function broadcastFullState() {
     ]);
 
     const mappedGames = games.map((g) => {
-      // Guard: extra must be an object — spreading a string causes corruption
-      const rawExtra = g.extra;
-      const extra = (typeof rawExtra === 'object' && rawExtra !== null ? rawExtra : {}) as Record<string, unknown>;
+      const extra = parseExtra(g.extra);
       return {
         ...g,
         bingoItems: extra.bingoItems ?? undefined,
@@ -114,19 +119,22 @@ admin.get("/games", adminAuth, async (c) => {
     SELECT id, title, duration, enabled, objective, supplies, notes, extra, sort_order
     FROM games ORDER BY sort_order ASC
   `;
-  const result = rows.map((g) => ({
-    id: g.id,
-    title: g.title,
-    duration: g.duration,
-    enabled: g.enabled,
-    objective: g.objective,
-    supplies: g.supplies,
-    notes: g.notes,
-    bingoItems: (g.extra as Record<string, unknown>)?.bingoItems ?? undefined,
-    bingoSize: (g.extra as Record<string, unknown>)?.bingoSize ?? undefined,
-    bingoFreeSpace: (g.extra as Record<string, unknown>)?.bingoFreeSpace ?? undefined,
-    sort_order: g.sort_order,
-  }));
+  const result = rows.map((g) => {
+    const extra = parseExtra(g.extra);
+    return {
+      id: g.id,
+      title: g.title,
+      duration: g.duration,
+      enabled: g.enabled,
+      objective: g.objective,
+      supplies: g.supplies,
+      notes: g.notes,
+      bingoItems: extra.bingoItems ?? undefined,
+      bingoSize: extra.bingoSize ?? undefined,
+      bingoFreeSpace: extra.bingoFreeSpace ?? undefined,
+      sort_order: g.sort_order,
+    };
+  });
   return c.json(result);
 });
 
@@ -177,9 +185,7 @@ admin.put("/games/:id", adminAuth, async (c) => {
     );
     if (!existingRow.length) return c.json({ error: "Game not found" }, 404);
 
-    // Guard: extra must be an object — spreading a string causes corruption
-    const rawExtra = existingRow[0].extra;
-    const existingExtra = (typeof rawExtra === 'object' && rawExtra !== null ? rawExtra : {}) as Record<string, unknown>;
+    const existingExtra = parseExtra(existingRow[0].extra);
     let newExtra = { ...existingExtra };
     if (body.bingoItems !== undefined) {
       newExtra.bingoItems = body.bingoItems;
